@@ -371,14 +371,28 @@
       }
       const list = Array.from(groups.values());
       this.groups = list;
-      const sort = this.layout.sort;
-      if (!sort || sort.key !== gc.key) list.sort((a, b) => collator.compare(a.label, b.label));
       const raw = k => this.store.raw[k];
-      const disp = [];
       for (const g of list) {
         g.type = 'group';
         g.totals = {};
         for (const c of cols) if (c.isNum) g.totals[c.key] = R.computeTotal(c.total, c.key, g.rows, raw);
+      }
+      // Sorting a number column orders the groups by their subtotal as well as the rows inside them.
+      const sort = this.layout.sort;
+      const sc = sort && cols.find(c => c.key === sort.key);
+      const byLabel = (a, b) => collator.compare(a.label, b.label);
+      if (sc && sc.isNum && sc.key !== gc.key && list.some(g => g.totals[sc.key] != null)) {
+        const dir = sort.dir === 'desc' ? -1 : 1;
+        list.sort((a, b) => {
+          const x = a.totals[sc.key], y = b.totals[sc.key];
+          if (x == null || y == null) return x == null && y == null ? byLabel(a, b) : x == null ? 1 : -1;
+          return x === y ? byLabel(a, b) : (x < y ? -dir : dir);
+        });
+      } else if (!sort || sort.key !== gc.key) {
+        list.sort(byLabel);
+      }
+      const disp = [];
+      for (const g of list) {
         disp.push(g);
         if (!this.collapsed.has(g.key)) for (const i of g.rows) disp.push(i);
       }
