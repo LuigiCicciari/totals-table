@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Format Table</title>
+  <link rel="stylesheet" href="css/format.css?v=202611121439">
+</head>
+<body>
+  <header>
+    <h1>Format table</h1>
+    <nav role="tablist">
+      <button role="tab" data-tab="display" aria-selected="true">Display</button>
+      <button role="tab" data-tab="columns" aria-selected="false">Columns &amp; totals</button>
+      <button role="tab" data-tab="rules" aria-selected="false">Totals rules</button>
+      <button role="tab" data-tab="download" aria-selected="false">Download</button>
+    </nav>
+  </header>
+
+  <main>
+    <section id="tab-display" role="tabpanel">
+      <fieldset>
+        <legend>Table</legend>
+        <label class="check"><input type="checkbox" id="showFilters"> Show a filter row under the headers</label>
+        <label class="field">Text filters match <select id="filterMode"><option value="contains">Contains</option><option value="startswith">Starts with</option><option value="exact">Exactly</option></select></label>
+        <label class="check"><input type="checkbox" id="showSearch"> Show a search box</label>
+        <label class="check"><input type="checkbox" id="showTooltips"> Show Tableau tooltips on hover</label>
+        <label class="check"><input type="checkbox" id="allowViewerLayout"> Let viewers move, hide, resize and freeze columns (saved in their own browser)</label>
+      </fieldset>
+      <fieldset>
+        <legend>Totals</legend>
+        <label class="check"><input type="checkbox" id="totalsShow"> Show a totals row</label>
+        <label class="field">Position <select id="totalsLocation"><option value="top">Top</option><option value="bottom">Bottom</option></select></label>
+      </fieldset>
+      <fieldset>
+        <legend>Columns</legend>
+        <label class="field">Freeze <select id="freeze"><option value="auto">Parameter columns (else leading text columns)</option><option value="0">Nothing</option><option value="1">First column</option><option value="2">First 2 columns</option><option value="3">First 3 columns</option><option value="4">First 4 columns</option><option value="5">First 5 columns</option><option value="6">First 6 columns</option></select></label>
+        <label class="check"><input type="checkbox" id="autoHideNone"> Hide a column when its parameter is set to "(none)"</label>
+      </fieldset>
+      <fieldset>
+        <legend>Empty values show as</legend>
+        <div class="inline">
+          <label>Text <input type="text" id="nullString" size="8"></label>
+          <label>Numbers <input type="text" id="nullNumber" size="8"></label>
+          <label>Dates <input type="text" id="nullDate" size="8"></label>
+        </div>
+        <p class="muted small">Downloads always leave empty values blank.</p>
+      </fieldset>
+    </section>
+
+    <section id="tab-columns" role="tabpanel" hidden>
+      <p class="muted small">Header: leave blank to use the parameter value (when the field and a parameter share a name) or the field name. Total "Auto" follows the imported rules, then sums.</p>
+      <table class="cols">
+        <thead><tr><th>Field</th><th>Header</th><th>Header from parameter</th><th>Total</th><th>Resolves to</th><th>Hidden</th></tr></thead>
+        <tbody id="colRows"></tbody>
+      </table>
+    </section>
+
+    <section id="tab-rules" role="tabpanel" hidden>
+      <div id="rulesStatus" class="note"></div>
+      <div class="buttons">
+        <label class="btn">Import rules file… <input type="file" id="rulesFile" accept=".json,application/json" hidden></label>
+        <button type="button" id="rulesExport" class="btn">Download current rules</button>
+        <button type="button" id="rulesClear" class="btn">Remove rules</button>
+      </div>
+      <ol id="rulesList" class="rules"></ol>
+      <details>
+        <summary>Paste rules instead</summary>
+        <textarea id="rulesPaste" rows="10" spellcheck="false" placeholder='{"rules":[{"when":{"equals":"Profit Ratio"},"total":{"type":"ratio","numerator":"Profit","denominator":"Sales"}}],"default":{"type":"sum"}}'></textarea>
+        <button type="button" id="rulesApply" class="btn">Use pasted rules</button>
+      </details>
+      <div id="rulesError" class="note error" hidden></div>
+    </section>
+
+    <section id="tab-download" role="tabpanel" hidden>
+      <fieldset>
+        <legend>Formats</legend>
+        <label class="radio"><input type="radio" name="formats" value="excel"> Excel only (one click)</label>
+        <label class="radio"><input type="radio" name="formats" value="csv"> CSV only (one click)</label>
+        <label class="radio"><input type="radio" name="formats" value="both"> Both (the download icon opens a menu)</label>
+      </fieldset>
+      <fieldset>
+        <legend>Contents</legend>
+        <p class="muted small">Downloads use the visible columns, in order, with the current sort and filters. Values are plain numbers with formatting, never formulas.</p>
+        <p class="muted small">CSV is always raw data: every row, no totals or subtotals. Collapsed groups on screen never hide rows from a download.</p>
+        <label class="check"><input type="checkbox" id="excelTotals"> Include the totals row in Excel</label>
+        <label class="check"><input type="checkbox" id="subtotals"> Include subtotal rows in Excel when the table is subtotalled, grouped so they can be collapsed and expanded in Excel</label>
+      </fieldset>
+      <fieldset>
+        <legend>File name</legend>
+        <label class="field">Template <input type="text" id="filename" size="44"></label>
+        <p class="muted small">Tokens: {sheet} {date} {time} {param:Parameter Name}. Preview: <code id="filePreview"></code></p>
+      </fieldset>
+    </section>
+  </main>
+
+  <footer>
+    <span id="msg" class="muted" role="status"></span>
+    <span class="spacer"></span>
+    <button type="button" id="cancel" class="btn">Cancel</button>
+    <button type="button" id="save" class="btn primary">Save</button>
+  </footer>
+
+  <script src="lib/tableau.extensions.1.latest.min.js"></script>
+  <script>if (/[?&]mock\b/.test(location.search)) document.write('<script src="test/mock-viz.js"><\/script>');</script>
+  <script src="src/rules.js?v=202611121439"></script>
+  <script src="src/exporter.js?v=202611121439"></script>
+  <script src="src/table.js?v=202611121439"></script>
+  <script src="src/format.js?v=202611121439"></script>
+</body>
+</html>
