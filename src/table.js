@@ -9,6 +9,8 @@
   const MIN_W = 48;
   const FREEZE_MAX = 0.6;
   const MAX_LEVELS = 3;
+  const NUL = '\u0000null';
+  const calcKey = d => d.kind === 'rank' ? '__rank:' + (d.dir || 'desc') + ':' + d.src : d.kind === 'run' ? '__run:' + d.src : '__' + d.kind + ':' + d.src + '|' + d.other;
 
   function defaults() {
     return {
@@ -29,7 +31,7 @@
       links: {},
       cf: {},
       colGroups: {},
-      layout: { order: [], hidden: [], widths: {}, labels: {}, freeze: 'auto', sort: null, groupBy: null, pct: [], cfOff: [], hideGroups: false }
+      layout: { order: [], hidden: [], widths: {}, labels: {}, freeze: 'auto', sort: null, groupBy: null, pct: [], calc: [], cfOff: [], hideGroups: false }
     };
   }
 
@@ -201,7 +203,8 @@
       for (const c of this.store.columns) {
         if (out.includes(c.key)) continue;
         // A new % of total column goes right after the column it is based on.
-        const at = c.virtual ? out.indexOf(c.srcKey) : -1;
+        let at = c.virtual ? out.indexOf(c.srcKey) : -1;
+        while (at >= 0 && at + 1 < out.length && (this.colDef(out[at + 1]) || {}).srcKey === c.srcKey) at++;
         if (at >= 0) out.splice(at + 1, 0, c.key); else out.push(c.key);
       }
       return out;
@@ -217,35 +220,84 @@
 
     // ---------- % of total columns ----------
 
+    // Table calculation columns: % of total (layout.pct), plus rank, running total, difference and
+    // % difference (layout.calc). Each sits right after the column it is based on.
+    virtualDefs() {
+      const lay = this.layout;
+      const num = k => { const c = k && this.colDef(k); return !!(c && c.isNum && !c.virtual); };
+      const out = [];
+      for (const k of lay.pct || []) if (num(k)) out.push({ kind: 'pct', src: k, key: '__pct:' + k });
+      for (const d of lay.calc || []) {
+        if (!num(d.src) || ((d.kind === 'diff' || d.kind === 'pdiff') && !num(d.other))) continue;
+        out.push(Object.assign({ key: calcKey(d) }, d));
+      }
+      return out;
+    }
+
     syncVirtual() {
       const st = this.store;
-      const want = (this.layout.pct || []).filter(k => { const c = this.colDef(k); return c && c.isNum && !c.virtual; });
-      st.columns = st.columns.filter(c => !c.virtual || want.includes(c.srcKey));
-      for (const k of want) {
-        const key = '__pct:' + k;
-        if (st.columns.some(c => c.key === key)) continue;
-        const src = this.colDef(k);
-        st.columns.push({ key, name: src.name + ' % of total', virtual: true, srcKey: k, isNum: true, dataType: 'float', spec: { cur: '', pct: true, dec: 2, group: false, scale: '', neg: 'minus' }, excelFmt: '0.00%;-0.00%' });
-        st.raw[key] = new Array(st.n).fill(NaN);
-        st.fmt[key] = new Array(st.n).fill(null);
+      const defs = this.virtualDefs();
+      const want = new Set(defs.map(d => d.key));
+      st.columns = st.columns.filter(c => !c.virtual || want.has(c.key));
+      for (const d of defs) {
+        if (st.columns.some(c => c.key === d.key)) continue;
+        const src = this.colDef(d.src);
+        const spec = d.kind === 'pct' ? { cur: '', pct: true, dec: 2, group: false, scale: '', neg: 'minus' }
+          : d.kind === 'pdiff' ? { cur: '', pct: true, dec: 1, group: false, scale: '', neg: 'minus' }
+          : d.kind === 'rank' ? { cur: '', pct: false, dec: 0, group: true, scale: '', neg: 'minus' } : src.spec;
+        const excelFmt = d.kind === 'pct' ? '0.00%;-0.00%' : d.kind === 'pdiff' ? '0.0%;-0.0%' : d.kind === 'rank' ? '#,##0' : src.excelFmt;
+        const col = { key: d.key, name: '', virtual: true, vkind: d.kind, srcKey: d.src, otherKey: d.other, dir: d.dir, isNum: true, dataType: 'float', spec, excelFmt };
+        st.columns.push(col);
+        col.name = this.labelFor(col);
+        st.raw[d.key] = new Array(st.n).fill(NaN);
+        st.fmt[d.key] = new Array(st.n).fill(null);
       }
     }
 
-    // Shares are of the filtered total, so they always add up to 100% of what is on screen.
+    // Shares are of the filtered total, so they always add up to 100% of what is on screen. Ranks cover the
+    // filtered rows. Running totals are filled later, once the final row order is known.
     fillVirtual(idx) {
       const st = this.store;
       for (const c of st.columns) {
-        if (!c.virtual) continue;
+        if (!c.virtual || c.vkind === 'run') continue;
         const src = st.raw[c.srcKey], raw = st.raw[c.key], fmt = st.fmt[c.key];
         if (raw.length !== st.n) { raw.length = st.n; fmt.length = st.n; }
-        let total = 0;
-        for (const i of idx) { const v = src[i]; if (v === v) total += v; }
-        for (let i = 0; i < st.n; i++) {
-          const v = src[i];
-          const share = v === v && total ? v / total : NaN;
-          raw[i] = share;
-          fmt[i] = share === share ? R.formatNumber(share, c.spec) : null;
+        raw.fill(NaN);
+        if (c.vkind === 'rank') {
+          const dir = c.dir === 'asc' ? 1 : -1;
+          const rows = idx.filter(i => src[i] === src[i]).sort((a, b) => dir * (src[a] - src[b]));
+          rows.forEach((i, k) => { raw[i] = k && src[i] === src[rows[k - 1]] ? raw[rows[k - 1]] : k + 1; });
+        } else if (c.vkind === 'diff' || c.vkind === 'pdiff') {
+          const oth = st.raw[c.otherKey];
+          for (let i = 0; i < st.n; i++) {
+            const a = src[i], b = oth[i];
+            if (a !== a || b !== b) continue;
+            raw[i] = c.vkind === 'diff' ? a - b : b ? (a - b) / b : NaN;
+          }
+        } else {
+          let total = 0;
+          for (const i of idx) { const v = src[i]; if (v === v) total += v; }
+          for (let i = 0; i < st.n; i++) { const v = src[i]; raw[i] = v === v && total ? v / total : NaN; }
         }
+        for (let i = 0; i < st.n; i++) fmt[i] = raw[i] === raw[i] ? R.formatNumber(raw[i], c.spec) : null;
+      }
+    }
+
+    // Running totals follow the rows in the order shown (inside subtotal groups, in group order).
+    fillRunning(cols, idx) {
+      const st = this.store;
+      const runs = cols.filter(c => c.vkind === 'run');
+      if (!runs.length) return;
+      const order = [];
+      if (this.groups) {
+        const walk = list => { for (const g of list) { if (g.children) walk(g.children); else order.push(...g.rows); } };
+        walk(this.groups);
+      } else order.push(...idx);
+      for (const c of runs) {
+        const src = st.raw[c.srcKey], raw = st.raw[c.key], fmt = st.fmt[c.key];
+        raw.fill(NaN); fmt.fill(null);
+        let acc = 0;
+        for (const i of order) { const v = src[i]; if (v === v) acc += v; raw[i] = acc; fmt[i] = R.formatNumber(acc, c.spec); }
       }
     }
 
@@ -276,7 +328,11 @@
     labelFor(col) {
       const l = this.layout.labels && this.layout.labels[col.key];
       if (l) return l;
-      if (col.virtual) { const src = this.colDef(col.srcKey); return (src ? this.labelFor(src) : col.name.replace(/ % of total$/, '')) + ' % of total'; }
+      if (col.virtual) {
+        const src = this.colDef(col.srcKey), oth = col.otherKey && this.colDef(col.otherKey);
+        const s = src ? this.labelFor(src) : col.srcKey, o = oth ? this.labelFor(oth) : '';
+        return { pct: s + ' % of total', rank: s + ' rank', run: s + ' running total', diff: s + ' − ' + o, pdiff: s + ' vs ' + o + ' %' }[col.vkind || 'pct'];
+      }
       const p = this.paramFor(col);
       return p ? p.value : col.name;
     }
@@ -331,6 +387,7 @@
       const totals = this.computeTotals(cols, idx);
       this.computeCfStats(cols, idx);
       const disp = this.groupRows(cols, idx, this.groupKeys());
+      this.fillRunning(cols, idx);
       this.view = { cols, idx, disp, totals, nFrozen, spans: this.groupSpans(cols) };
     }
 
@@ -407,6 +464,12 @@
           else if (mode === 'exact') tests.push(i => fmt[i] != null && fmt[i].toLowerCase() === q);
           else tests.push(i => fmt[i] != null && fmt[i].toLowerCase().indexOf(q) >= 0);
         }
+        if (f.keep || f.exclude) {
+          const fmt = st.fmt[c.key];
+          const v = i => fmt[i] == null ? NUL : fmt[i];
+          if (f.keep) { const s = new Set(f.keep); tests.push(i => s.has(v(i))); }
+          if (f.exclude) { const s = new Set(f.exclude); tests.push(i => !s.has(v(i))); }
+        }
       }
       if (this.search) {
         const q = this.search.toLowerCase();
@@ -465,7 +528,16 @@
     }
 
     totalSpec(c) {
-      if (c.virtual) return { type: 'sum', source: 'pct', text: 'Share of the filtered total' };
+      if (c.virtual) {
+        if (c.vkind === 'rank') return { type: 'none', source: 'calc', text: 'No total for a rank' };
+        if (c.vkind === 'run') return { type: 'none', source: 'calc', text: 'No total for a running total' };
+        if (c.vkind === 'diff' || c.vkind === 'pdiff') {
+          const a = this.colDef(c.srcKey), b = this.colDef(c.otherKey);
+          a.total = this.totalSpec(a); b.total = this.totalSpec(b);
+          return { type: 'diff', mode: c.vkind, a, b, source: 'calc', text: c.vkind === 'diff' ? 'Total of ' + this.labelFor(a) + ' − total of ' + this.labelFor(b) : '(Total of ' + this.labelFor(a) + ' − total of ' + this.labelFor(b) + ') ÷ total of ' + this.labelFor(b) };
+        }
+        return { type: 'sum', source: 'pct', text: 'Share of the filtered total' };
+      }
       const t = R.resolveTotal(c, this.store.columns, this.cfg.rules && this.cfg.rules.doc, this.cfg.totalOverrides[c.key]);
       t.text = R.describeTotal(t, this.store.columns);
       return t;
@@ -473,14 +545,24 @@
 
     computeTotals(cols, idx) {
       const out = {};
-      const raw = k => this.store.raw[k];
       for (const c of cols) {
         if (!c.isNum) continue;
         c.total = this.totalSpec(c);
-        out[c.key] = R.computeTotal(c.total, c.key, idx, raw);
+        out[c.key] = this.totalOf(c, idx);
       }
       out.__label = (cols.find(c => !c.isNum) || {}).key || null;
       return out;
+    }
+
+    // Difference columns total from their two columns' own totals, so ratio columns compare correctly.
+    totalOf(c, rows) {
+      const t = c.total;
+      if (t && t.type === 'diff') {
+        const A = this.totalOf(t.a, rows), B = this.totalOf(t.b, rows);
+        if (A == null || B == null) return null;
+        return t.mode === 'diff' ? A - B : B ? (A - B) / B : null;
+      }
+      return R.computeTotal(t, c.key, rows, k => this.store.raw[k]);
     }
 
     // Builds up to three nested subtotal levels. Group keys are paths, so the same station under two markets
@@ -490,7 +572,6 @@
       this.groups = null;
       this.groupCols = gcs;
       if (!gcs.length) return idx;
-      const raw = k => this.store.raw[k];
       const sorts = this.sortList();
       const firstNum = sorts.map(s => cols.find(c => c.key === s.key)).find(c => c && c.isNum);
       const numDir = firstNum && sorts.find(s => s.key === firstNum.key).dir === 'desc' ? -1 : 1;
@@ -508,7 +589,7 @@
         const list = Array.from(map.values());
         for (const g of list) {
           g.totals = {};
-          for (const c of cols) if (c.isNum) g.totals[c.key] = R.computeTotal(c.total, c.key, g.rows, raw);
+          for (const c of cols) if (c.isNum) g.totals[c.key] = this.totalOf(c, g.rows);
           if (level + 1 < gcs.length) g.children = build(g.rows, level + 1, g.key + '\u0001');
         }
         // A sort on this level's own column orders its groups by name. Otherwise the first number sort orders
@@ -558,6 +639,7 @@
         <div class="tp-bar">
           <input class="tp-search" type="search" placeholder="Search" aria-label="Search table" hidden>
           <span class="tp-status" role="status" aria-live="polite"></span>
+          <span class="tp-vfs"></span>
           <span class="tp-spacer"></span>
           <button class="tp-chip" type="button" hidden title="Your column changes are saved in this browser only">Custom layout · Reset</button>
           <button class="tp-icon tp-cols" type="button" title="Show and hide columns" aria-label="Show and hide columns">${ICONS.cols}</button>
@@ -590,6 +672,7 @@
       window.addEventListener('resize', () => this.refresh());
       this.searchEl.addEventListener('input', () => { clearTimeout(this.searchT); this.searchT = setTimeout(() => { this.search = this.searchEl.value.trim(); this.refresh(); }, 150); });
       q('.tp-chip').addEventListener('click', () => this.resetLocal());
+      q('.tp-vfs').addEventListener('click', e => { const b = e.target.closest('button[data-k]'); if (b) this.clearValueFilter(b.dataset.k); });
       q('.tp-cols').addEventListener('click', e => this.openColumnsPicker(e.currentTarget));
       q('.tp-dl').addEventListener('click', e => this.onDownloadClick(e.currentTarget));
       q('.tp-gear').addEventListener('click', () => this.openFormat());
@@ -624,6 +707,21 @@
         if (!st.complete) text = 'Loading ' + st.n.toLocaleString() + ' of ' + (st.total || 0).toLocaleString() + '…';
       }
       this.statusEl.textContent = text || '';
+      // One chip per column filtered with Keep only / Exclude; clicking it removes that filter.
+      const chips = [];
+      if (st) {
+        for (const c of this.view.cols) {
+          const f = this.filters[c.key];
+          if (!f || !(f.keep || f.exclude)) continue;
+          const name = v => v === NUL ? this.nullFor(c) : v;
+          const list = (f.keep || f.exclude).map(name);
+          const text = c.label + (f.keep ? ': only ' : ': not ') + (list.length > 2 ? list.slice(0, 2).join(', ') + ' +' + (list.length - 2) : list.join(', '));
+          chips.push(`<button type="button" class="tp-chip tp-vchip" data-k="${esc(c.key)}" title="${esc(c.label + (f.keep ? ' kept: ' : ' excluded: ') + list.join(', ') + '\nClick to remove this filter')}">${esc(text.length > 48 ? text.slice(0, 47) + '…' : text)} ✕</button>`);
+        }
+      }
+      const vfs = q('.tp-vfs');
+      const html = chips.join('');
+      if (vfs.innerHTML !== html) vfs.innerHTML = html;
       this.statusEl.classList.toggle('err', !!this.statusErr);
       this.searchEl.hidden = !this.cfg.showSearch;
       q('.tp-gear').hidden = !this.authoring;
@@ -773,7 +871,7 @@
         const sortTip = (sort ? '\nSorted ' + (c.isNum ? (sort.dir === 'desc' ? 'largest to smallest' : 'smallest to largest') : (sort.dir === 'desc' ? 'Z to A' : 'A to Z')) + (sorts.length > 1 ? ' (sort ' + (si + 1) + ' of ' + sorts.length + ')' : '') : '') +
           '\nShift-click to sort by more than one column';
         const p = this.paramFor(c);
-        h += `<div ${this.cellAttrs(c, 'tp-h')} data-i="${i}" title="${esc(c.label + (p ? '  (from parameter ' + p.name + ')' : '') + (c.label !== c.name ? '\nField: ' + c.name : '') + sortTip + this.cfDescribe(c))}">` +
+        h += `<div ${this.cellAttrs(c, 'tp-h')} data-i="${i}" title="${esc(c.label + (p ? '  (from parameter ' + p.name + ')' : '') + (c.label !== c.name && !c.virtual ? '\nField: ' + c.name : '') + sortTip + this.cfDescribe(c))}">` +
           `<span class="tp-hl">${esc(c.label)}${arrow}</span>` +
           `<button class="tp-hm" type="button" data-i="${i}" aria-label="Column menu for ${esc(c.label)}">▾</button>` +
           (canEdit ? `<span class="tp-rz" data-i="${i}"></span>` : '') + '</div>';
@@ -1155,11 +1253,17 @@
         const n = g ? (g.r1 - g.r0 + 1) * (g.c1 - g.c0 + 1) : 0;
         const what = n > 1 ? 'Copy ' + n.toLocaleString() + ' cells' : 'Copy cell';
         const x = e.clientX, y = e.clientY;
+        const pick = this.pickedValues();
+        const short = s => s.length > 30 ? s.slice(0, 29) + '…' : s;
+        const shown = pick && (pick.values.length === 1 ? '"' + short(pick.values[0] === NUL ? this.nullFor(pick.col) : pick.values[0]) + '"' : pick.values.length + ' values');
         const html = '<div class="tp-menu" role="menu">' +
+          (pick ? `<button type="button" data-v="keep">Keep only ${esc(shown)}</button><button type="button" data-v="exclude">Exclude ${esc(shown)}</button><hr>` : '') +
           `<button type="button" data-m="cells">${what}</button>` +
           '<button type="button" data-m="headers">Copy with headers</button><hr>' +
           `<button type="button" data-m="all">Copy whole table (${this.view.idx.length.toLocaleString()} rows)</button></div>`;
         this.openPop({ getBoundingClientRect: () => ({ left: x, bottom: y }) }, html, pop => pop.addEventListener('click', ev => {
+          const v = ev.target.closest('button[data-v]');
+          if (v) { this.closePop(); return this.valueFilter(pick, v.dataset.v); }
           const b = ev.target.closest('button[data-m]');
           if (!b) return;
           this.closePop();
@@ -1168,6 +1272,41 @@
         }));
       });
       this.el.addEventListener('contextmenu', e => e.preventDefault());
+    }
+
+    // ---------- keep only / exclude ----------
+
+    // The distinct shown values in the selected cells of one column (subtotal rows count as their group's value).
+    pickedValues() {
+      const g = this.normRange();
+      if (!g || g.c0 !== g.c1) return null;
+      const col = this.view.cols[g.c0];
+      if (!col || col.virtual) return null;
+      const fmt = this.store.fmt[col.key];
+      const vals = new Set();
+      for (let r = g.r0; r <= g.r1 && vals.size <= 50; r++) {
+        const d = this.view.disp[r];
+        let i = d;
+        if (typeof d === 'object') { if (d.colKey !== col.key) continue; i = d.rows[0]; }
+        if (typeof i !== 'number') continue;
+        vals.add(fmt[i] == null ? NUL : fmt[i]);
+      }
+      return vals.size ? { col, values: Array.from(vals) } : null;
+    }
+
+    // Table-only filters, like the filter row: they last for this session and never change Tableau's filters.
+    valueFilter(pick, mode) {
+      const f = this.filters[pick.col.key] = Object.assign({}, this.filters[pick.col.key]);
+      if (mode === 'keep') { f.keep = pick.values.slice(); delete f.exclude; }
+      else f.exclude = Array.from(new Set((f.exclude || []).concat(pick.values)));
+      this.range = null;
+      this.refresh();
+    }
+
+    clearValueFilter(key) {
+      const f = this.filters[key];
+      if (f) { delete f.keep; delete f.exclude; }
+      this.refresh();
     }
 
     normRange() {
@@ -1352,9 +1491,21 @@
             ['g-new', 'New group…'], cur ? ['g-out', 'Remove from group "' + cur + '"'] : null);
         }
         const hasPct = (lay.pct || []).includes(c.key);
-        if (c.virtual) items.push('-', ['pct-remove', 'Remove % of total column']);
-        else if (c.isNum && (hasPct || (c.total && c.total.type === 'sum'))) items.push('-', [hasPct ? 'pct-remove' : 'pct-add', hasPct ? 'Remove % of total column' : 'Add % of total column']);
+        if (c.virtual) items.push('-', ['calc-remove', c.vkind === 'pct' ? 'Remove % of total column' : 'Remove this column']);
+        else if (c.isNum) {
+          // Shares and running totals only make sense for columns that add up; ranks and comparisons work for any number.
+          const calc = lay.calc || [];
+          const has = d => calc.some(x => calcKey(x) === calcKey(d));
+          const sums = c.total && c.total.type === 'sum';
+          items.push('-',
+            hasPct || sums ? [hasPct ? 'pct-remove' : 'pct-add', hasPct ? 'Remove % of total column' : 'Add % of total column'] : null,
+            !has({ kind: 'rank', src: c.key, dir: 'desc' }) ? ['rank-desc', 'Add rank (largest = 1)'] : null,
+            !has({ kind: 'rank', src: c.key, dir: 'asc' }) ? ['rank-asc', 'Add rank (smallest = 1)'] : null,
+            sums && !has({ kind: 'run', src: c.key }) ? ['run', 'Add running total'] : null,
+            ['compare', 'Compare with another column…']);
+        }
       }
+      items.push('-', ['stats', 'Column stats…']);
       if (c.isNum && c.total) items.push('-', ['info', 'Total: ' + c.total.text + (c.total.problem ? ' (' + c.total.problem + ')' : ''), true]);
       if (this.authoring) items.push(['format', 'Format table…']);
       const html = '<div class="tp-menu" role="menu">' + items.filter(Boolean).map(it => it === '-' ? '<hr>' :
@@ -1363,7 +1514,106 @@
         const b = e.target.closest('button[data-a]');
         if (!b) return;
         this.closePop();
+        if (b.dataset.a === 'stats') return this.openStats(i, anchor);
+        if (b.dataset.a === 'compare') return this.openCompare(i, anchor);
         this.menuAction(b.dataset.a, i, c);
+      }));
+    }
+
+    // ---------- column stats ----------
+
+    // Summary of one column over the rows passing the current filters; data rows only, never totals or subtotals.
+    columnStats(c) {
+      const st = this.store;
+      const idx = this.view.idx;
+      const n = idx.length;
+      const lines = [['Rows', n === st.n ? n.toLocaleString() : n.toLocaleString() + ' of ' + st.n.toLocaleString() + ' (filtered)']];
+      const textCols = this.view.cols.filter(x => !x.isNum && x !== c).slice(0, 2);
+      const rowName = i => { const s = textCols.map(x => st.fmt[x.key][i]).filter(v => v != null).join(' · '); return s ? ', ' + s : ''; };
+      const count = k => k.toLocaleString();
+      if (c.isNum) {
+        const raw = st.raw[c.key];
+        const vals = [];
+        let sum = 0, lo = -1, hi = -1;
+        for (const i of idx) {
+          const v = raw[i];
+          if (v !== v) continue;
+          vals.push(v); sum += v;
+          if (lo < 0 || v < raw[lo]) lo = i;
+          if (hi < 0 || v > raw[hi]) hi = i;
+        }
+        const f = v => R.formatNumber(v, c.spec);
+        lines.push(['With a value', count(vals.length)], ['Blank', count(n - vals.length)]);
+        if (vals.length) {
+          vals.sort((a, b) => a - b);
+          const m = vals.length >> 1;
+          const med = vals.length % 2 ? vals[m] : (vals[m - 1] + vals[m]) / 2;
+          lines.push(['Sum', f(sum)], ['Average', f(sum / vals.length)], ['Median', f(med)],
+            ['Min', f(raw[lo]) + rowName(lo)], ['Max', f(raw[hi]) + rowName(hi)]);
+          const t = this.view.totals[c.key];
+          if (c.total && t != null) lines.push(['Table total', f(t) + ' (' + c.total.text + ')']);
+        }
+      } else if (c.isDate || st.dates[c.key]) {
+        const arr = c.isDate ? st.raw[c.key] : st.dates[c.key];
+        const fmt = st.fmt[c.key];
+        let lo = -1, hi = -1, blank = 0;
+        const days = new Set();
+        for (const i of idx) {
+          const v = arr[i];
+          if (v == null || v !== v) { blank++; continue; }
+          days.add(Math.floor(v / 86400000));
+          if (lo < 0 || v < arr[lo]) lo = i;
+          if (hi < 0 || v > arr[hi]) hi = i;
+        }
+        if (lo >= 0) lines.push(['Earliest', fmt[lo]], ['Latest', fmt[hi]]);
+        lines.push(['Distinct days', count(days.size)], ['Blank', count(blank)]);
+      } else {
+        const fmt = st.fmt[c.key];
+        const counts = new Map();
+        let blank = 0;
+        for (const i of idx) {
+          const v = fmt[i];
+          if (v == null || v === '') { blank++; continue; }
+          counts.set(v, (counts.get(v) || 0) + 1);
+        }
+        lines.push(['Distinct values', count(counts.size)], ['Blank', count(blank)]);
+        const top = Array.from(counts).sort((a, b) => b[1] - a[1] || collator.compare(a[0], b[0])).slice(0, 5);
+        top.forEach(([v, k], j) => lines.push([j ? '' : 'Most common', v + ' (' + count(k) + ')']));
+      }
+      return lines;
+    }
+
+    openCompare(i, anchor) {
+      const c = this.view.cols[i];
+      const others = this.store.columns.filter(x => x.isNum && !x.virtual && x.key !== c.key);
+      if (!others.length) return this.flash('There is no other number column to compare with.');
+      const html = `<div class="tp-menu tp-picker tp-compare"><div class="tp-ph">Compare ${esc(c.label)} with</div>` +
+        `<select aria-label="Column to compare with">${others.map(x => `<option value="${esc(x.key)}">${esc(this.labelFor(x))}</option>`).join('')}</select>` +
+        '<label><input type="radio" name="tp-cm" value="diff" checked> Difference (this − that)</label>' +
+        '<label><input type="radio" name="tp-cm" value="pdiff"> % difference ((this − that) ÷ that)</label>' +
+        '<hr><button type="button" data-a="add">Add column</button></div>';
+      this.openPop(anchor, html, pop => pop.addEventListener('click', e => {
+        if (!e.target.closest('button[data-a="add"]')) return;
+        const other = pop.querySelector('select').value;
+        const kind = pop.querySelector('input[name="tp-cm"]:checked').value;
+        this.closePop();
+        const d = { kind, src: c.key, other };
+        const calc = (this.layout.calc || []).filter(x => calcKey(x) !== calcKey(d));
+        this.updateLayout({ calc: calc.concat(d) });
+      }));
+    }
+
+    openStats(i, anchor) {
+      const c = this.view.cols[i];
+      if (!c || !this.store) return;
+      const lines = this.columnStats(c);
+      const html = `<div class="tp-menu tp-stats"><div class="tp-ph">${esc(c.label)}</div><table>` +
+        lines.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join('') +
+        '</table><hr><button type="button" data-a="copy">Copy stats</button></div>';
+      this.openPop(anchor, html, pop => pop.addEventListener('click', e => {
+        if (!e.target.closest('button[data-a="copy"]')) return;
+        this.closePop();
+        this.copyToClipboard([c.label].concat(lines.map(([k, v]) => k + '\t' + v)).join('\n'));
       }));
     }
 
@@ -1430,6 +1680,15 @@
           return this.setGroups(g => { g[c.key] = name.trim(); });
         }
         case 'g-out': return this.setGroups(g => { delete g[c.key]; });
+        case 'rank-desc':
+        case 'rank-asc':
+        case 'run': {
+          const d = a === 'run' ? { kind: 'run', src: c.key } : { kind: 'rank', src: c.key, dir: a === 'rank-asc' ? 'asc' : 'desc' };
+          return this.updateLayout({ calc: (lay.calc || []).concat(d) });
+        }
+        case 'calc-remove':
+          if (c.vkind === 'pct') return this.updateLayout({ pct: (lay.pct || []).filter(k => k !== c.srcKey) });
+          return this.updateLayout({ calc: (lay.calc || []).filter(d => calcKey(d) !== c.key) });
         case 'pct-add': return this.updateLayout({ pct: (lay.pct || []).concat(c.key) });
         case 'pct-remove': {
           const src = c.virtual ? c.srcKey : c.key;
