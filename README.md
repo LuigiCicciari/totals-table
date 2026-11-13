@@ -77,5 +77,7 @@ Tested in Tableau Desktop and Tableau Cloud: loading and field carry-over, param
 
 ## Libraries
 
-- Tableau Extensions API 1.17 (MIT)
+- Tableau Extensions API 1.17 (Apache 2.0)
 - ExcelJS 4.4.0 (MIT), loaded only when someone downloads Excel
+
+See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for copyright notices and license texts, including the packages bundled inside ExcelJS.
