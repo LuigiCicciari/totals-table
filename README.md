@@ -86,7 +86,7 @@ On Tableau Cloud, a site admin must add the extension's address to the site's al
 
 ## Status
 
-Tested in Tableau Desktop and Tableau Cloud: loading and field carry-over, parameter headers, freezing, sorting, filters, column dragging, totals and subtotals, collapsing, right-click copy, Excel and CSV downloads, viewer layouts, Tableau tooltips, and mark selection.
+Tested in Tableau Desktop and Tableau Cloud: loading and field carry-over, parameter headers, freezing, sorting, filters and search, column dragging, totals and subtotals, collapsing, % of total columns, links, conditional formatting, group headers, right-click copy, Excel and CSV downloads, viewer layouts, Tableau tooltips, and mark selection.
 
 ## Libraries
 

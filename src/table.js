@@ -911,6 +911,10 @@
       const bounds = [0];
       this.view.cols.forEach(c => bounds.push(bounds[bounds.length - 1] + c.w));
       let guide = null, gap = from;
+      // A group lands only between groups (or among ungrouped columns), never inside another group.
+      const cols = this.view.cols;
+      const ok = g => last === from || g <= 0 || g >= cols.length || (g > from && g <= last) ||
+        !this.groupOf(cols[g - 1]) || this.groupOf(cols[g - 1]) !== this.groupOf(cols[g]);
       const move = ev => {
         if (!guide) {
           if (Math.abs(ev.clientX - x0) < 6) return;
@@ -921,6 +925,11 @@
         }
         const x = ev.clientX - gridLeft;
         gap = mids.filter(m => m < x).length;
+        if (!ok(gap)) {
+          let best = -1;
+          bounds.forEach((b, g) => { if (ok(g) && (best < 0 || Math.abs(b - x) < Math.abs(bounds[best] - x))) best = g; });
+          gap = best;
+        }
         guide.style.left = bounds[gap] + 'px';
       };
       const up = () => {
