@@ -7,7 +7,7 @@ A fast table for Tableau worksheets, with correct totals for ratio columns, head
 **Table**
 - Columns: drag to reorder, move first/left/right/last, hide, show/hide picker, resize, rename/reset name
 - Rows load A to Z by the text columns on the left, like a crosstab. Click a header to sort (text A to Z first, numbers largest first); viewers can always sort
-- Per-column filters (text: contains, starts with or exact; numbers: min/max), optional search box
+- Optional filter row under the headers (text: contains, starts with or exact; numbers: min/max) and optional search box, both turned on in Format → Display
 - Frozen header and totals row. Parameter-driven columns are frozen by default; drag the freeze line or use "Freeze up to here"
 - Optional subtotals by any text column. Click a group row to collapse it, or use Collapse all / Expand all in that column's menu. Sorting a number column orders the groups by their subtotal and the rows within each group; sorting the subtotalled column orders the groups by name
 - Right-click to copy cells, cells with headers, or the whole table (data rows only, in on-screen order). Tableau Desktop keeps Ctrl+C for itself, so right-click is the reliable way
@@ -73,7 +73,7 @@ On Tableau Cloud, a site admin must add the extension's address to the site's al
 
 ## Status
 
-Tested in Tableau Desktop and Tableau Cloud: loading and field carry-over, parameter headers, freezing, sorting, filters, column dragging, totals and subtotals, collapsing, right-click copy, Excel and CSV downloads, and viewer layouts. Still to confirm: whether the Tableau tooltip clears on mouse-out.
+Tested in Tableau Desktop and Tableau Cloud: loading and field carry-over, parameter headers, freezing, sorting, filters, column dragging, totals and subtotals, collapsing, right-click copy, Excel and CSV downloads, viewer layouts, Tableau tooltips, and mark selection.
 
 ## Libraries
 
