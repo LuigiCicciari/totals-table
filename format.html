@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <title>Format Table</title>
-  <link rel="stylesheet" href="css/format.css?v=202611131432">
+  <link rel="stylesheet" href="css/format.css?v=202611131511">
 </head>
 <body>
   <header>
@@ -14,6 +14,7 @@
       <button role="tab" data-tab="display" aria-selected="true">Display</button>
       <button role="tab" data-tab="columns" aria-selected="false">Columns &amp; totals</button>
       <button role="tab" data-tab="formatting" aria-selected="false">Formatting</button>
+      <button role="tab" data-tab="style" aria-selected="false">Style</button>
       <button role="tab" data-tab="rules" aria-selected="false">Totals rules</button>
       <button role="tab" data-tab="download" aria-selected="false">Download</button>
     </nav>
@@ -70,6 +71,49 @@
       </table>
     </section>
 
+    <section id="tab-style" role="tabpanel" hidden>
+      <p class="muted small">The look of the whole table. Every setting starts at the original design, so nothing changes until you set it. Colors warn when text would be hard to read. Excel downloads follow the colors, bold and number formats; text size and row height are screen only.</p>
+      <div class="stylegrid">
+        <fieldset>
+          <legend>Text and spacing</legend>
+          <label class="field">Text size <select id="stSize"><option value="small">Small</option><option value="normal">Normal</option><option value="large">Large</option></select></label>
+          <label class="field">Row height <select id="stDensity"><option value="compact">Compact</option><option value="normal">Normal</option><option value="roomy">Roomy</option></select></label>
+          <div class="field">Text color <div class="colorctl" data-k="text" data-pal="text"></div></div>
+        </fieldset>
+        <fieldset>
+          <legend>Headers</legend>
+          <div class="field">Background <div class="colorctl" data-k="headBg" data-pal="bg"></div></div>
+          <div class="field">Text color <div class="colorctl" data-k="headText" data-pal="text"></div></div>
+          <label class="check"><input type="checkbox" id="stHeadBold"> Bold</label>
+          <label class="check"><input type="checkbox" id="stHeadWrap"> Wrap long names onto two lines</label>
+        </fieldset>
+        <fieldset>
+          <legend>Lines and shading</legend>
+          <label class="field">Lines <select id="stLines"><option value="both">Rows and columns</option><option value="horizontal">Rows only</option><option value="vertical">Columns only</option><option value="none">None</option></select></label>
+          <label class="check"><input type="checkbox" id="stBanding"> Shade every other row</label>
+        </fieldset>
+        <fieldset>
+          <legend>Totals and subtotals</legend>
+          <div class="field">Totals background <div class="colorctl" data-k="totBg" data-pal="bg"></div></div>
+          <label class="check"><input type="checkbox" id="stTotBold"> Bold totals</label>
+          <div class="field">Subtotal background <div class="colorctl" data-k="subBg" data-pal="bg"></div></div>
+          <label class="check"><input type="checkbox" id="stSubBold"> Bold subtotals</label>
+        </fieldset>
+        <fieldset>
+          <legend>Numbers and accent</legend>
+          <label class="field">Negative numbers <select id="stNeg"><option value="">As Tableau formats them</option><option value="minus">-1,234</option><option value="parens">(1,234)</option><option value="red">-1,234 in red</option><option value="redparens">(1,234) in red</option></select></label>
+          <div class="field">Accent (selection, links) <div class="colorctl" data-k="accent" data-pal="accent"></div></div>
+        </fieldset>
+      </div>
+      <div class="buttons"><button type="button" id="stReset" class="btn">Reset table style to the original</button></div>
+      <h2 class="sub">Column overrides</h2>
+      <p class="muted small">Optional, per column. "As Tableau" keeps the format from the worksheet. Units: K, M and B divide by a thousand, million and billion; Auto picks one from the column's largest value.</p>
+      <table class="cols">
+        <thead><tr><th>Field</th><th>Align</th><th>Bold</th><th>Number style</th><th>Decimals</th><th>Units</th><th>Negatives</th></tr></thead>
+        <tbody id="fmtRows"></tbody>
+      </table>
+    </section>
+
     <section id="tab-rules" role="tabpanel" hidden>
       <div id="rulesStatus" class="note"></div>
       <div class="buttons">
@@ -117,9 +161,9 @@
 
   <script src="lib/tableau.extensions.1.latest.min.js"></script>
   <script>if (/[?&]mock\b/.test(location.search)) document.write('<script src="test/mock-viz.js"><\/script>');</script>
-  <script src="src/rules.js?v=202611131432"></script>
-  <script src="src/exporter.js?v=202611131432"></script>
-  <script src="src/table.js?v=202611131432"></script>
-  <script src="src/format.js?v=202611131432"></script>
+  <script src="src/rules.js?v=202611131511"></script>
+  <script src="src/exporter.js?v=202611131511"></script>
+  <script src="src/table.js?v=202611131511"></script>
+  <script src="src/format.js?v=202611131511"></script>
 </body>
 </html>

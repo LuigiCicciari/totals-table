@@ -38,6 +38,12 @@ A fast table for Tableau worksheets, with correct totals for ratio columns, head
 - Viewers who find it distracting can choose Hide formatting from a column's menu. Like other viewer changes, it's saved in their own browser and undone by Reset, and their downloads match what they see
 - Excel keeps the colors and symbols (the cells stay real numbers), and data bars become Excel's own data bars
 
+**Style** (Format → Style)
+- The whole table's look: text size, row height (compact, normal, roomy), text color, header background and text color, bold or wrapped headers, row and column lines, alternating row shading, totals and subtotal colors and bold, how negative numbers show (-1,234, (1,234), or either in red), and an accent color for selection and links
+- Everything starts at the original design, so nothing changes until it's set. Colors come with a short palette of readable choices or any #RRGGBB code, and each one shows its contrast, warning below 4.5:1
+- Per-column overrides: alignment, bold, number style (number, currency, percent), decimals, units (K, M, B, or Auto from the column's largest value) and negatives. Difference and running total columns follow their source column's format
+- Excel downloads follow the colors, bold, alignment and number formats (red negatives use Excel's own red); text size and row height are screen only
+
 **Headers from parameters**
 - If a field and a parameter share a name (for example a calculated field "Column 1" driven by a parameter "Column 1"), the header shows the parameter's current value and updates live
 - A column whose parameter is set to "(none)" is hidden automatically

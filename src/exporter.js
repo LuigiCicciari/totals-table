@@ -87,13 +87,21 @@
       const v = tot[c.key];
       return v == null || !isFinite(v) ? null : v;
     });
+    // Header, totals and subtotal colors and boldness follow the table's style settings.
+    const st = snap.style || {};
+    const argbOf = hex => 'FF' + String(hex).replace('#', '').toUpperCase();
+    const fill = hex => ({ type: 'pattern', pattern: 'solid', fgColor: { argb: argbOf(hex) } });
     const styleRow = (row, kind) => {
-      row.font = { bold: true };
       if (kind === 'header') {
-        row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F2F2' } };
+        row.font = Object.assign({ bold: st.headBold !== false }, st.headText ? { color: { argb: argbOf(st.headText) } } : {});
+        row.fill = fill(st.headBg || '#F2F2F2');
         row.border = { bottom: { style: 'thin', color: { argb: 'FFBFBFBF' } } };
       } else if (kind === 'group') {
-        row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF7F7F7' } };
+        row.font = { bold: st.subBold !== false };
+        row.fill = fill(st.subBg || '#F7F7F7');
+      } else {
+        row.font = { bold: st.totBold !== false };
+        if (st.totBg) row.fill = fill(st.totBg);
       }
     };
 
@@ -147,6 +155,7 @@
         const vals = cols.map(c => xlCell(snap.value(c, r.i), c));
         const row = ws.addRow(vals);
         vals.forEach((v, k) => { if (v && v.hyperlink) row.getCell(k + 1).font = { color: { argb: 'FF0563C1' }, underline: true }; });
+        cols.forEach((c, k) => { if (c.bold) { const cell = row.getCell(k + 1); cell.font = Object.assign({}, cell.font, { bold: true }); } });
         applyFormat(row, vals, false);
         if (outline && r.level) {
           row.outlineLevel = r.level;
@@ -155,6 +164,12 @@
       }
     }
     const lastData = ws.rowCount;
+    // Column alignment overrides, below the (centered) group header row.
+    cols.forEach((c, k) => {
+      if (!c.align) return;
+      const horizontal = { l: 'left', c: 'center', r: 'right' }[c.align];
+      ws.getColumn(k + 1).eachCell((cell, rowNo) => { if (rowNo >= headRow) cell.alignment = Object.assign({}, cell.alignment, { horizontal }); });
+    });
     if (bottom) { const tv = totalsValues(snap.totals, 'Total'); const tr = ws.addRow(tv); styleRow(tr, 'totals'); applyFormat(tr, tv, true); }
     // Data bars use Excel's own data bars over the data rows, so they stay live if values change in Excel.
     for (const b of snap.barColumns || []) {

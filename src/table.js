@@ -4,7 +4,6 @@
 
   const R = window.TPRules;
   const SETTINGS_KEY = 'tp-config';
-  const ROW_H = 26;
   const OVERSCAN = 12;
   const MIN_W = 48;
   const FREEZE_MAX = 0.6;
@@ -31,6 +30,9 @@
       links: {},
       cf: {},
       colGroups: {},
+      colFormat: {},
+      // Whole-table look. The defaults are the original design, so nothing changes until an author sets something.
+      style: { size: 'normal', density: 'normal', text: '#1f2328', headBg: '#f6f8fa', headText: '#1f2328', headBold: true, headWrap: false, lines: 'both', banding: true, totBg: '#fbfbfc', totBold: true, subBg: '#f3f5f8', subBold: true, neg: '', accent: '#1f6feb' },
       layout: { order: [], hidden: [], widths: {}, labels: {}, freeze: 'auto', sort: null, groupBy: null, pct: [], calc: [], cfOff: [], hideGroups: false }
     };
   }
@@ -48,6 +50,8 @@
     out.links = saved.links || {};
     out.cf = saved.cf || {};
     out.colGroups = saved.colGroups || {};
+    out.colFormat = saved.colFormat || {};
+    out.style = Object.assign(defaults().style, saved.style);
     return out;
   }
 
@@ -109,6 +113,103 @@
       let saved = null;
       try { saved = JSON.parse(tableau.extensions.settings.get(SETTINGS_KEY) || 'null'); } catch (e) { saved = null; }
       this.cfg = mergeConfig(saved);
+      this.applyStyle();
+    }
+
+    // ---------- style ----------
+
+    applyStyle() {
+      const s = this.cfg.style;
+      const set = (el, k, v) => el.style.setProperty(k, v);
+      this.rowH = ({ compact: 22, normal: 26, roomy: 32 }[s.density] || 26) + (s.size === 'large' ? 2 : 0);
+      set(this.el, '--tp-row-h', this.rowH + 'px');
+      set(this.el, '--tp-text', s.text);
+      set(this.el, '--tp-accent', s.accent);
+      set(this.el, '--tp-sel', mix(s.accent, '#FFFFFF', 0.84));
+      this.el.style.fontSize = ({ small: 11, normal: 12, large: 14 }[s.size] || 12) + 'px';
+      // Header and total colors apply inside the table only, so the toolbar keeps its look.
+      set(this.scroller, '--tp-head-bg', s.headBg);
+      set(this.scroller, '--tp-head-text', s.headText);
+      set(this.scroller, '--tp-tot-bg', s.totBg);
+      set(this.scroller, '--tp-grp-bg', s.subBg);
+      set(this.scroller, '--tp-grp-bg1', mix(s.subBg, '#FFFFFF', 0.4));
+      set(this.scroller, '--tp-grp-bg2', mix(s.subBg, '#FFFFFF', 0.65));
+      const cl = this.scroller.classList;
+      ['tp-lines-h', 'tp-lines-v', 'tp-lines-none'].forEach(c => cl.remove(c));
+      if (s.lines === 'horizontal') cl.add('tp-lines-h'); else if (s.lines === 'vertical') cl.add('tp-lines-v'); else if (s.lines === 'none') cl.add('tp-lines-none');
+      cl.toggle('tp-noband', !s.banding);
+      cl.toggle('tp-hwrap', !!s.headWrap);
+      cl.toggle('tp-hnb', !s.headBold);
+      cl.toggle('tp-totnb', !s.totBold);
+      cl.toggle('tp-subnb', !s.subBold);
+    }
+
+    // Effective number format: Tableau's own, then the table-wide negative style, then the column's overrides.
+    effSpec(c) {
+      const o = (!c.virtual && this.cfg.colFormat[c.key]) || {};
+      const neg = o.neg || this.cfg.style.neg;
+      const dec = o.dec === undefined || o.dec === '' ? null : Number(o.dec);
+      if (!neg && dec == null && !o.units && !o.kind) return null;
+      const base = c.virtual ? c.ownSpec : c.baseSpec !== undefined ? c.baseSpec : c.spec;
+      const s = Object.assign({ cur: '', pct: false, dec: 2, group: true, scale: '', neg: 'minus' }, base || {});
+      if (o.kind === 'number') { s.cur = ''; s.pct = false; }
+      else if (o.kind === 'currency') { s.cur = (base && base.cur) || '$'; s.pct = false; s.group = true; }
+      else if (o.kind === 'percent') { s.pct = true; s.cur = ''; }
+      if (o.units === 'none') s.scale = '';
+      else if (o.units === 'K' || o.units === 'M' || o.units === 'B') s.scale = o.units;
+      else if (o.units === 'auto') {
+        let m = 0;
+        for (const v of this.store.raw[c.key]) { const a = Math.abs(v); if (a > m) m = a; }
+        s.scale = s.pct ? '' : m >= 1e9 ? 'B' : m >= 1e6 ? 'M' : m >= 1e3 ? 'K' : '';
+      }
+      if (dec != null) s.dec = dec;
+      if (neg) { s.neg = neg === 'parens' || neg === 'redparens' ? 'paren' : 'minus'; s.red = neg === 'red' || neg === 'redparens'; }
+      return s;
+    }
+
+    excelFor(spec) {
+      const f = R.excelNumFmt(spec);
+      if (!f || !spec.red) return f;
+      const parts = f.split(';');
+      parts[1] = '[Red]' + parts[1];
+      return parts.join(';');
+    }
+
+    // Applies number overrides once all rows are in (rows still arriving keep Tableau's format for a moment),
+    // keeping Tableau's own strings so an override can be undone. Also sets each column's alignment and bold classes.
+    applyFormats() {
+      const st = this.store;
+      st.fmtBase = st.fmtBase || {};
+      for (const c of st.columns) {
+        const o = (!c.virtual && this.cfg.colFormat[c.key]) || {};
+        c.cls = (o.align ? ' al-' + o.align : '') + (o.bold ? ' b' : '');
+        if (!c.isNum) continue;
+        if (c.virtual) {
+          // Differences and running totals are in the source column's units, so they share its format.
+          const src = (c.vkind === 'run' || c.vkind === 'diff') && this.colDef(c.srcKey);
+          if (src) { c.spec = src.spec; c.excelFmt = src.excelFmt; continue; }
+          const eff = this.effSpec(c);
+          c.spec = eff || c.ownSpec;
+          c.excelFmt = eff ? this.excelFor(eff) : c.ownExcel;
+          continue;
+        }
+        if (!st.complete) continue;
+        const eff = this.effSpec(c);
+        const sig = eff ? JSON.stringify(eff) : '';
+        if (sig === (c.fmtSig || '')) continue;
+        if (c.baseSpec === undefined) { c.baseSpec = c.spec; c.baseExcel = c.excelFmt; st.fmtBase[c.key] = st.fmt[c.key]; }
+        if (eff) {
+          const raw = st.raw[c.key];
+          st.fmt[c.key] = raw.map(v => v === v && v != null ? R.formatNumber(v, eff) : null);
+          c.spec = eff;
+          c.excelFmt = this.excelFor(eff);
+        } else {
+          st.fmt[c.key] = st.fmtBase[c.key];
+          c.spec = c.baseSpec;
+          c.excelFmt = c.baseExcel;
+        }
+        c.fmtSig = sig;
+      }
     }
 
     async saveConfig() {
@@ -246,7 +347,7 @@
           : d.kind === 'pdiff' ? { cur: '', pct: true, dec: 1, group: false, scale: '', neg: 'minus' }
           : d.kind === 'rank' ? { cur: '', pct: false, dec: 0, group: true, scale: '', neg: 'minus' } : src.spec;
         const excelFmt = d.kind === 'pct' ? '0.00%;-0.00%' : d.kind === 'pdiff' ? '0.0%;-0.0%' : d.kind === 'rank' ? '#,##0' : src.excelFmt;
-        const col = { key: d.key, name: '', virtual: true, vkind: d.kind, srcKey: d.src, otherKey: d.other, dir: d.dir, isNum: true, dataType: 'float', spec, excelFmt };
+        const col = { key: d.key, name: '', virtual: true, vkind: d.kind, srcKey: d.src, otherKey: d.other, dir: d.dir, isNum: true, dataType: 'float', spec, excelFmt, ownSpec: spec, ownExcel: excelFmt };
         st.columns.push(col);
         col.name = this.labelFor(col);
         st.raw[d.key] = new Array(st.n).fill(NaN);
@@ -367,6 +468,7 @@
       const st = this.store;
       const lay = this.layout;
       this.syncVirtual();
+      this.applyFormats();
       const hidden = new Set(lay.hidden || []);
       const cols = [];
       for (const k of this.orderedKeys()) {
@@ -738,8 +840,10 @@
 
     template() { return this.view.cols.map(c => c.w + 'px').join(' '); }
 
+    negCls(c, v) { return c.spec && c.spec.red && v < 0 ? ' neg' : ''; }
+
     cellAttrs(c, extra, extraStyle) {
-      let cls = 'tp-c' + (c.isNum ? ' num' : '') + (extra ? ' ' + extra : '');
+      let cls = 'tp-c' + (c.isNum ? ' num' : '') + (c.cls || '') + (extra ? ' ' + extra : '');
       let style = extraStyle || '';
       if (c.frozen) {
         cls += ' fz';
@@ -922,7 +1026,7 @@
           const text = loading ? '…' : v == null ? '' : R.formatNumber(v, c.spec);
           const title = (c.total ? c.total.text : '') + (c.total && c.total.problem ? ' — ' + c.total.problem : '') + (c.total && c.total.source === 'override' ? ' (set for this column)' : c.total && c.total.source === 'rule' ? ' (' + c.total.label + ')' : '');
           const f = loading ? null : this.cellFormat(c, v, true);
-          h += `<div ${this.cellAttrs(c, (c.total && c.total.problem ? 'warn' : '') + (f ? ' cf' : ''), f && f.style)} title="${esc(title)}">${this.cfInner(f, esc(text))}</div>`;
+          h += `<div ${this.cellAttrs(c, (c.total && c.total.problem ? 'warn' : '') + (f ? ' cf' : '') + (loading ? '' : this.negCls(c, v)), f && f.style)} title="${esc(title)}">${this.cfInner(f, esc(text))}</div>`;
         } else {
           h += `<div ${this.cellAttrs(c)}></div>`;
         }
@@ -935,18 +1039,20 @@
       const total = disp.length;
       const viewH = this.scroller.clientHeight;
       const top = Math.max(0, this.scroller.scrollTop - this.body.offsetTop);
-      const start = Math.max(0, Math.floor(top / ROW_H) - OVERSCAN);
-      const end = Math.min(total, Math.ceil((top + viewH) / ROW_H) + OVERSCAN);
+      const rowH = this.rowH || 26;
+      const start = Math.max(0, Math.floor(top / rowH) - OVERSCAN);
+      const end = Math.min(total, Math.ceil((top + viewH) / rowH) + OVERSCAN);
       if (!force && start === this.rStart && end === this.rEnd) return;
       this.rStart = start;
       this.rEnd = end;
-      this.body.style.height = total * ROW_H + 'px';
-      this.pad.style.height = start * ROW_H + 'px';
+      this.body.style.height = total * rowH + 'px';
+      this.pad.style.height = start * rowH + 'px';
       const st = this.store;
       const nulls = cols.map(c => esc(this.nullFor(c)));
       const fmts = cols.map(c => st.fmt[c.key]);
       const links = cols.map(c => { const l = this.linkFor(c); return l ? { urls: st.fmt[l.urlKey], label: l.label } : null; });
       const cfCols = cols.map(c => !!(c.isNum && this.cfg.cf[c.key] && this.cfg.cf[c.key].type));
+      const reds = cols.map(c => !!(c.isNum && c.spec && c.spec.red));
       const rg = this.normRange();
       let h = '';
       for (let r = start; r < end; r++) {
@@ -959,7 +1065,7 @@
             else if (c.isNum) {
               const gv = d.totals[c.key];
               const f = this.cellFormat(c, gv, true);
-              h += `<div ${this.cellAttrs(c, f ? 'cf' : '', f && f.style)} data-c="${j}">${this.cfInner(f, esc(gv == null ? '' : R.formatNumber(gv, c.spec)))}</div>`;
+              h += `<div ${this.cellAttrs(c, (f ? 'cf' : '') + this.negCls(c, gv), f && f.style)} data-c="${j}">${this.cfInner(f, esc(gv == null ? '' : R.formatNumber(gv, c.spec)))}</div>`;
             }
             else h += `<div ${this.cellAttrs(c)} data-c="${j}"></div>`;
           });
@@ -976,7 +1082,7 @@
           const lk = links[j];
           const url = lk && this.safeUrl(lk.urls[d]);
           if (url && (v != null || lk.label)) inner = `<a class="tp-link" href="${esc(url)}" target="_blank" rel="noopener noreferrer" title="${esc(url)}">${esc(lk.label || v)}</a>`;
-          h += `<div ${this.cellAttrs(cols[j], (v == null ? 'nul' : '') + (inRange ? ' rg' : '') + (f ? ' cf' : ''), f && f.style)} data-c="${j}">${inner}</div>`;
+          h += `<div ${this.cellAttrs(cols[j], (v == null ? 'nul' : '') + (inRange ? ' rg' : '') + (f ? ' cf' : '') + (reds[j] ? this.negCls(cols[j], st.raw[cols[j].key][d]) : ''), f && f.style)} data-c="${j}">${inner}</div>`;
         }
         h += '</div>';
       }
@@ -1835,7 +1941,8 @@
       }
       return {
         sheetName: this.ws.name,
-        columns: cols.map(c => ({ key: c.key, label: c.label, spec: c.spec, excelFmt: c.excelFmt, width: c.w, isNum: c.isNum })),
+        columns: cols.map(c => { const o = (!c.virtual && this.cfg.colFormat[c.key]) || {}; return { key: c.key, label: c.label, spec: c.spec, excelFmt: c.excelFmt, width: c.w, isNum: c.isNum, align: o.align || null, bold: !!o.bold }; }),
+        style: this.cfg.style,
         rows,
         value,
         totals,

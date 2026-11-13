@@ -56,3 +56,11 @@ table.cols td .resolves { margin-top: 4px; max-width: 230px; }
 .cfset { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
 .cfset label { display: flex; gap: 4px; align-items: center; font-size: 12px; }
 .cfset input[type="number"] { width: 80px; padding: 3px 5px; border: 1px solid #c9ced4; border-radius: 4px; }
+.stylegrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 0 12px; }
+.colorctl { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.colorctl .swatch { width: 20px; height: 20px; border-radius: 4px; border: 1px solid #c9ced4; padding: 0; cursor: pointer; }
+.colorctl .swatch[aria-pressed="true"] { outline: 2px solid #1f6feb; outline-offset: 1px; }
+.colorctl input[type="text"] { width: 82px; font-family: Consolas, monospace; font-size: 12px; }
+.cnote { flex-basis: 100%; font-size: 11px; color: #59636e; }
+.cnote.low { color: #9a6700; font-weight: 600; }
+h2.sub { font-size: 13px; margin: 14px 0 4px; }

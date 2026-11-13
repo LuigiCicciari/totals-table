@@ -1,4 +1,4 @@
-/* global tableau, TPRules, TPExport, TPMergeConfig */
+/* global tableau, TPRules, TPExport, TPMergeConfig, TPDefaults */
 (function () {
   'use strict';
 
@@ -14,6 +14,7 @@
     if (name === 'columns') renderColumns();
     if (name === 'rules') renderRules();
     if (name === 'formatting') renderFormatting();
+    if (name === 'style') renderStyle();
   }
 
   // ---------- display + download ----------
@@ -39,6 +40,7 @@
   }
 
   function readSimple() {
+    readStyle();
     cfg.showFilters = $('showFilters').checked;
     cfg.filterMode = $('filterMode').value;
     cfg.showSearch = $('showSearch').checked;
@@ -252,6 +254,117 @@
     if (rerender) renderFormatting();
   }
 
+  // ---------- style ----------
+
+  // Palettes picked for readable pairings; any other color can be typed as a #RRGGBB code.
+  const PALETTES = {
+    bg: ['#FFFFFF', '#F6F8FA', '#EEF1F5', '#E3EAF4', '#E6F2EC', '#F4EFE4', '#EDE9F5', '#1F2937', '#0B3D63', '#14532D'],
+    text: ['#1F2328', '#000000', '#374151', '#4B5563', '#0B3D63', '#FFFFFF'],
+    accent: ['#1F6FEB', '#0B5CAD', '#0F766E', '#6D28D9', '#B42318', '#9A3412', '#374151']
+  };
+  const STYLE_LABELS = { text: 'Text color', headBg: 'Header background', headText: 'Header text', totBg: 'Totals background', subBg: 'Subtotal background', accent: 'Accent color' };
+
+  function lum(hex) {
+    const c = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255).map(v => v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  }
+  function contrast(a, b) {
+    const x = lum(a), y = lum(b);
+    return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+  }
+  const isHex = v => /^#[0-9a-f]{6}$/i.test(v);
+
+  // The pairings each color is read against; the weakest one is shown.
+  function contrastFor(k) {
+    const st = cfg.style;
+    const pairs = {
+      text: [[st.text, '#FFFFFF'], [st.text, st.totBg], [st.text, st.subBg]],
+      headBg: [[st.headText, st.headBg]],
+      headText: [[st.headText, st.headBg]],
+      totBg: [[st.text, st.totBg]],
+      subBg: [[st.text, st.subBg]],
+      accent: [[st.accent, '#FFFFFF']]
+    }[k];
+    return Math.min(...pairs.filter(p => isHex(p[0]) && isHex(p[1])).map(p => contrast(p[0], p[1])));
+  }
+
+  function colorCtl(el) {
+    const k = el.dataset.k;
+    const cur = String(cfg.style[k] || '').toUpperCase();
+    const ratio = contrastFor(k);
+    const low = ratio < 4.5;
+    el.innerHTML = PALETTES[el.dataset.pal].map(c => `<button type="button" class="swatch" data-c="${c}" style="background:${c}" aria-pressed="${c === cur}" aria-label="${STYLE_LABELS[k]} ${c}" title="${c}"></button>`).join('') +
+      `<input type="text" value="${esc(cur)}" aria-label="${STYLE_LABELS[k]} code" spellcheck="false">` +
+      `<span class="cnote${low ? ' low' : ''}">${isFinite(ratio) ? 'Contrast ' + ratio.toFixed(1) + ':1' + (low ? ': hard to read, aim for 4.5:1 or more' : '') : ''}</span>`;
+  }
+
+  function fmtSelect(i, k, val, opts, label) {
+    return `<select data-i="${i}" data-k="${k}" aria-label="${esc(label)}">` + opts.map(([v, t]) => `<option value="${v}"${String(val || '') === v ? ' selected' : ''}>${t}</option>`).join('') + '</select>';
+  }
+
+  // The style controls are only read once they have been filled in, so an unopened tab never overwrites settings.
+  let styleShown = false;
+
+  function renderStyle() {
+    styleShown = true;
+    const st = cfg.style;
+    $('stSize').value = st.size;
+    $('stDensity').value = st.density;
+    $('stHeadBold').checked = st.headBold;
+    $('stHeadWrap').checked = st.headWrap;
+    $('stLines').value = st.lines;
+    $('stBanding').checked = st.banding;
+    $('stTotBold').checked = st.totBold;
+    $('stSubBold').checked = st.subBold;
+    $('stNeg').value = st.neg || '';
+    document.querySelectorAll('.colorctl').forEach(colorCtl);
+    $('fmtRows').innerHTML = cols.map((c, i) => {
+      const o = cfg.colFormat[c.key] || {};
+      const num = c.isNum;
+      return `<tr>
+        <td class="name" title="${esc(c.key)}">${esc(c.name)}</td>
+        <td>${fmtSelect(i, 'align', o.align, [['', 'Default'], ['l', 'Left'], ['c', 'Center'], ['r', 'Right']], 'Alignment for ' + c.name)}</td>
+        <td><input type="checkbox" data-i="${i}" data-k="bold"${o.bold ? ' checked' : ''} aria-label="Bold ${esc(c.name)}"></td>
+        <td>${num ? fmtSelect(i, 'kind', o.kind, [['', 'As Tableau'], ['number', 'Number'], ['currency', 'Currency'], ['percent', 'Percent']], 'Number style for ' + c.name) : '<span class="muted">—</span>'}</td>
+        <td>${num ? fmtSelect(i, 'dec', o.dec, [['', 'As Tableau'], ['0', '0'], ['1', '1'], ['2', '2'], ['3', '3'], ['4', '4']], 'Decimals for ' + c.name) : '<span class="muted">—</span>'}</td>
+        <td>${num ? fmtSelect(i, 'units', o.units, [['', 'As Tableau'], ['none', 'None'], ['K', 'K'], ['M', 'M'], ['B', 'B'], ['auto', 'Auto']], 'Units for ' + c.name) : '<span class="muted">—</span>'}</td>
+        <td>${num ? fmtSelect(i, 'neg', o.neg, [['', 'Table default'], ['minus', '-1,234'], ['parens', '(1,234)'], ['red', '-1,234 red'], ['redparens', '(1,234) red']], 'Negatives for ' + c.name) : '<span class="muted">—</span>'}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  function readStyle() {
+    if (!styleShown) return;
+    const st = cfg.style;
+    st.size = $('stSize').value;
+    st.density = $('stDensity').value;
+    st.headBold = $('stHeadBold').checked;
+    st.headWrap = $('stHeadWrap').checked;
+    st.lines = $('stLines').value;
+    st.banding = $('stBanding').checked;
+    st.totBold = $('stTotBold').checked;
+    st.subBold = $('stSubBold').checked;
+    st.neg = $('stNeg').value;
+  }
+
+  function setColor(k, v) {
+    if (!isHex(v)) return false;
+    cfg.style[k] = v.toUpperCase();
+    document.querySelectorAll('.colorctl').forEach(colorCtl);
+    return true;
+  }
+
+  function onFmtChange(e) {
+    const el = e.target;
+    if (!el.dataset || el.dataset.i == null) return;
+    const c = cols[+el.dataset.i];
+    const k = el.dataset.k;
+    const o = Object.assign({}, cfg.colFormat[c.key]);
+    const v = el.type === 'checkbox' ? el.checked : el.value;
+    if (v === '' || v === false) delete o[k]; else o[k] = v;
+    if (Object.keys(o).length) cfg.colFormat[c.key] = o; else delete cfg.colFormat[c.key];
+  }
+
   // ---------- rules ----------
 
   function describeRule(r) {
@@ -331,6 +444,19 @@
     $('rulesApply').addEventListener('click', () => useRules($('rulesPaste').value, 'pasted text'));
     $('rulesExport').addEventListener('click', downloadRules);
     $('rulesClear').addEventListener('click', () => { cfg.rules = null; renderRules(); });
+    $('tab-style').addEventListener('click', e => {
+      const sw = e.target.closest('.swatch');
+      if (sw) setColor(sw.closest('.colorctl').dataset.k, sw.dataset.c);
+    });
+    $('tab-style').addEventListener('change', e => {
+      const ctl = e.target.closest('.colorctl');
+      if (ctl && e.target.type === 'text') {
+        const v = e.target.value.trim();
+        if (!setColor(ctl.dataset.k, v.startsWith('#') ? v : '#' + v)) $('msg').textContent = 'Colors need a 6-digit code like #1F2328.';
+      }
+    });
+    $('fmtRows').addEventListener('change', onFmtChange);
+    $('stReset').addEventListener('click', () => { cfg.style = TPDefaults().style; renderStyle(); });
     $('save').addEventListener('click', save);
     $('cancel').addEventListener('click', () => tableau.extensions.ui.closeDialog(''));
   }
