@@ -789,7 +789,7 @@
         this.dragStart = null;
         if (!ds || ds.moved || e.shiftKey) { this.renderBody(true); return; }
         this.range = { r0: ds.r, c0: ds.c, r1: ds.r, c1: ds.c };
-        this.clickRow(ds.r, e.ctrlKey || e.metaKey);
+        this.clickRow(ds.r, e.ctrlKey || e.metaKey, { x: e.clientX, y: e.clientY });
       });
       this.rowsEl.addEventListener('mouseleave', () => this.unhover());
       // Right-click copy: Tableau Desktop keeps Ctrl+C for itself, so this is the reliable way to copy.
@@ -827,7 +827,7 @@
       return { r0: Math.min(g.r0, g.r1), r1: Math.max(g.r0, g.r1), c0: Math.min(g.c0, g.c1), c1: Math.max(g.c0, g.c1) };
     }
 
-    clickRow(r, toggle) {
+    clickRow(r, toggle, point) {
       const d = this.view.disp[r];
       if (typeof d === 'object') {
         if (this.collapsed.has(d.key)) this.collapsed.delete(d.key); else this.collapsed.add(d.key);
@@ -842,7 +842,9 @@
       else { this.selected.clear(); this.selected.add(tid); }
       this.renderBody(true);
       const ids = Array.from(this.selected);
-      const sel = ids.length ? this.ws.selectTuplesAsync(ids, tableau.SelectOptions.Simple, {}) : this.ws.selectTuplesAsync([], tableau.SelectOptions.Simple, {});
+      // Same shape as Tableau's samples: a real anchor point for the tooltip, or none at all (an empty object errors).
+      const tip = this.cfg.showTooltips && point && ids.length ? { tooltipAnchorPoint: { x: point.x, y: point.y } } : undefined;
+      const sel = this.ws.selectTuplesAsync(ids, tableau.SelectOptions.Simple, tip);
       Promise.resolve(sel).catch(() => { /* selection is best effort */ });
     }
 
