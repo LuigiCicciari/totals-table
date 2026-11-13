@@ -44,7 +44,11 @@
           }
         }
       }
-      for (let r = 0; r < data.length; r++) this.tuple.push(marks && marks[r] ? marks[r].tupleId : null);
+      // Tableau identifies a summary-data mark by its 1-based row position unless marksInfo says otherwise.
+      for (let r = 0; r < data.length; r++) {
+        const m = marks && marks[r] && marks[r].tupleId != null ? marks[r].tupleId : null;
+        this.tuple.push(m != null ? m : this.n + r + 1);
+      }
       this.n += data.length;
     }
 

@@ -864,7 +864,7 @@
       clearTimeout(this.hoverT);
       if (this.hoverTid == null) return;
       this.hoverTid = null;
-      Promise.resolve(this.ws.hoverTupleAsync(0, { tooltipAnchorPoint: { x: 0, y: 0 } })).catch(() => { /* ignore */ });
+      Promise.resolve(this.ws.hoverTupleAsync(null)).catch(() => { /* ignore */ });
     }
 
     onKey(e) {
