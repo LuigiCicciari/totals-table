@@ -904,18 +904,49 @@
       if (last == null) last = from;
       e.preventDefault();
       const x0 = e.clientX;
-      const gridLeft = this.grid.getBoundingClientRect().left;
+      const cols = this.view.cols;
+      const nF = this.view.nFrozen;
+      const frozenW = this.frozenWidth || 0;
+      const sc = this.scroller;
       const mids = [];
       let acc = 0;
-      this.view.cols.forEach(c => { mids.push(acc + c.w / 2); acc += c.w; });
+      cols.forEach(c => { mids.push(acc + c.w / 2); acc += c.w; });
       const bounds = [0];
-      this.view.cols.forEach(c => bounds.push(bounds[bounds.length - 1] + c.w));
-      let guide = null, gap = from;
-      // A group lands only between groups (or among ungrouped columns), never inside another group.
-      const cols = this.view.cols;
-      const ok = g => last === from || g <= 0 || g >= cols.length || (g > from && g <= last) ||
-        !this.groupOf(cols[g - 1]) || this.groupOf(cols[g - 1]) !== this.groupOf(cols[g]);
+      cols.forEach(c => bounds.push(bounds[bounds.length - 1] + c.w));
+      let guide = null, gap = from, lastX = x0, raf = 0;
+      const ok = g => this.dropOk(g, from, last);
+      // Frozen columns stay pinned on the left, so the pointer maps to them there and to the scrolled columns elsewhere.
+      const visible = g => g <= nF || bounds[g] >= frozenW + sc.scrollLeft - 1;
+      const place = () => {
+        const vx = lastX - sc.getBoundingClientRect().left;
+        const x = nF && vx < frozenW ? vx : vx + sc.scrollLeft;
+        gap = mids.filter(m => m < x).length;
+        if (!ok(gap) || !visible(gap)) {
+          let best = -1;
+          bounds.forEach((b, g) => { if (ok(g) && visible(g) && (best < 0 || Math.abs(b - x) < Math.abs(bounds[best] - x))) best = g; });
+          if (best >= 0) gap = best;
+        }
+        guide.style.left = (gap <= nF ? bounds[gap] + sc.scrollLeft : bounds[gap]) + 'px';
+      };
+      // Holding the pointer near either edge scrolls the table, so far-off positions can be reached.
+      const EDGE = 48;
+      const tick = () => {
+        raf = 0;
+        if (!guide) return;
+        const r = sc.getBoundingClientRect();
+        const vx = lastX - r.left;
+        const leftEdge = nF ? frozenW : 0;
+        let dx = 0;
+        if (vx > sc.clientWidth - EDGE) dx = Math.ceil((vx - (sc.clientWidth - EDGE)) / 3);
+        else if (vx >= leftEdge && vx < leftEdge + EDGE && sc.scrollLeft > 0) dx = -Math.ceil((leftEdge + EDGE - vx) / 3);
+        if (dx) {
+          sc.scrollLeft += dx;
+          place();
+          raf = setTimeout(tick, 16);
+        }
+      };
       const move = ev => {
+        lastX = ev.clientX;
         if (!guide) {
           if (Math.abs(ev.clientX - x0) < 6) return;
           guide = document.createElement('div');
@@ -923,18 +954,13 @@
           this.grid.appendChild(guide);
           this.grid.classList.add('tp-dragging');
         }
-        const x = ev.clientX - gridLeft;
-        gap = mids.filter(m => m < x).length;
-        if (!ok(gap)) {
-          let best = -1;
-          bounds.forEach((b, g) => { if (ok(g) && (best < 0 || Math.abs(b - x) < Math.abs(bounds[best] - x))) best = g; });
-          gap = best;
-        }
-        guide.style.left = bounds[gap] + 'px';
+        place();
+        if (!raf) raf = setTimeout(tick, 16);
       };
       const up = () => {
         window.removeEventListener('mousemove', move);
         window.removeEventListener('mouseup', up);
+        if (raf) clearTimeout(raf);
         if (!guide) return;
         guide.remove();
         this.grid.classList.remove('tp-dragging');
@@ -972,6 +998,13 @@
       const ti = order.indexOf(target);
       order.splice(fromVis < toVis ? ti + 1 : ti, 0, k);
       this.updateLayout({ order });
+    }
+
+    // A group (from..last) lands only between groups or among ungrouped columns, never inside another group.
+    dropOk(g, from, last) {
+      const cols = this.view.cols;
+      return last === from || g <= 0 || g >= cols.length || (g > from && g <= last) ||
+        !this.groupOf(cols[g - 1]) || this.groupOf(cols[g - 1]) !== this.groupOf(cols[g]);
     }
 
     // Moves visible columns from..last so they start at visible gap position `gap` (0..cols.length).
@@ -1346,16 +1379,32 @@
       const s = (this.view.spans || []).find(x => x.start === start);
       if (!s || !s.label) return;
       const items = [];
-      if (this.canEditLayout()) items.push(['hide', 'Hide group headers']);
+      const n = this.view.cols.length;
+      const okGap = g => this.dropOk(g, s.start, s.end);
+      const gaps = [];
+      for (let g = 0; g <= n; g++) if (okGap(g) && (g < s.start || g > s.end + 1)) gaps.push(g);
+      const first = s.frozen ? 0 : this.view.nFrozen;
+      const moves = {
+        'mv-start': gaps.find(g => g >= first && g < s.start),
+        'mv-left': gaps.filter(g => g >= first && g < s.start).pop(),
+        'mv-right': gaps.find(g => g > s.end + 1),
+        'mv-end': s.end < n - 1 ? n : undefined
+      };
+      if (this.canEditLayout()) {
+        items.push(moves['mv-start'] != null ? ['mv-start', 'Move group to start'] : null, moves['mv-left'] != null ? ['mv-left', 'Move group left'] : null,
+          moves['mv-right'] != null ? ['mv-right', 'Move group right'] : null, moves['mv-end'] != null ? ['mv-end', 'Move group to end'] : null, '-');
+        items.push(['hide', 'Hide group headers']);
+      }
       if (this.authoring) items.push('-', ['rename', 'Rename group…'], ['remove', 'Remove group "' + s.label + '"']);
       if (!items.length) items.push(['none', s.label, true]);
-      const html = '<div class="tp-menu" role="menu">' + items.map(it => it === '-' ? '<hr>' :
+      const html = '<div class="tp-menu" role="menu">' + items.filter(Boolean).map(it => it === '-' ? '<hr>' :
         `<button type="button" role="menuitem" data-a="${it[0]}"${it[2] ? ' disabled' : ''}>${esc(it[1])}</button>`).join('') + '</div>';
       this.openPop(anchor, html, pop => pop.addEventListener('click', e => {
         const b = e.target.closest('button[data-a]');
         if (!b) return;
         this.closePop();
         const a = b.dataset.a;
+        if (a in moves) return this.moveBlock(s.start, s.end, moves[a]);
         if (a === 'hide') return this.updateLayout({ hideGroups: true });
         if (a === 'remove') return this.setGroups(g => { Object.keys(g).forEach(k => { if (g[k] === s.label) delete g[k]; }); });
         if (a === 'rename') {
