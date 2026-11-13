@@ -34,7 +34,8 @@ button, input, select { font: inherit; color: inherit; }
 .tp-info { cursor: help; }
 .tp-chip { border: 1px solid var(--tp-line-strong); background: #fff8e6; color: var(--tp-warn); border-radius: 10px; padding: 0 8px; height: 20px; cursor: pointer; font-size: 11px; }
 
-.tp-scroll { position: relative; flex: 1 1 auto; overflow: auto; }
+/* overflow-anchor: none stops the browser "correcting" scroll position while rows are swapped, which made the wheel run away. */
+.tp-scroll { position: relative; flex: 1 1 auto; overflow: auto; overflow-anchor: none; }
 .tp-grid { position: relative; min-width: 100%; }
 .tp-hrow, .tp-frow, .tp-trow, .tp-row { display: grid; grid-template-columns: var(--cols); }
 .tp-top { position: sticky; top: 0; z-index: 3; background: #fff; }
