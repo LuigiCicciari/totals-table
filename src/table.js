@@ -1553,7 +1553,9 @@
           vals.sort((a, b) => a - b);
           const m = vals.length >> 1;
           const med = vals.length % 2 ? vals[m] : (vals[m - 1] + vals[m]) / 2;
-          lines.push(['Sum', f(sum)], ['Average', f(sum / vals.length)], ['Median', f(med)],
+          // A sum of ratios or averages means nothing, so Sum only shows for columns that total by summing.
+          if (!c.total || c.total.type === 'sum') lines.push(['Sum', f(sum)]);
+          lines.push(['Average', f(sum / vals.length)], ['Median', f(med)],
             ['Min', f(raw[lo]) + rowName(lo)], ['Max', f(raw[hi]) + rowName(hi)]);
           const t = this.view.totals[c.key];
           if (c.total && t != null) lines.push(['Table total', f(t) + ' (' + c.total.text + ')']);

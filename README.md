@@ -18,7 +18,7 @@ A fast table for Tableau worksheets, with correct totals for ratio columns, head
   - Running total, in the order rows are shown (for columns that sum)
   - Compare with another column: difference (this − that) or % difference ((this − that) ÷ that). Totals and subtotals compare the two columns' own totals, so ratio columns compare correctly
 - Keep only / Exclude: right-click a cell (or a range in one column) to filter the table to those values or remove them. A chip above the table shows each one; click it to remove. Like the filter row, these only affect the table, never Tableau's filters, and clear when the page reloads
-- Column stats from any column's menu: rows, blanks, sum, average, median, min and max (with the row they come from) and the table total for numbers; distinct values and the most common for text; earliest, latest and distinct days for dates. Stats cover the filtered rows only, never totals or subtotals, and can be copied
+- Column stats from any column's menu: rows, blanks, sum (only for columns that total by summing), average, median, min and max (with the row they come from) and the table total for numbers; distinct values and the most common for text; earliest, latest and distinct days for dates. Stats cover the filtered rows only, never totals or subtotals, and can be copied
 - Right-click to copy cells, cells with headers, or the whole table (data rows only, in on-screen order). Tableau Desktop keeps Ctrl+C for itself, so right-click is the reliable way
 - Tableau tooltips on hover, mark selection on click (Ctrl/Cmd-click adds), so dashboard actions keep working
 - Only the rows on screen are drawn, so large tables scroll smoothly. Rows appear while the rest are still loading
