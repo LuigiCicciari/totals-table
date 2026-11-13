@@ -60,6 +60,8 @@ A fast table for Tableau worksheets, with correct totals for ratio columns, head
 
 **Viewer layouts**
 - When "Let viewers move, hide, resize and freeze columns" is on, a viewer's changes (column order, hidden columns, widths, names, freeze, sort, subtotals, % of total columns, hidden formatting and hidden group headers) are saved in their own browser only. A "Custom layout · Reset" chip appears so they can return to the published layout
+- Saved layouts: viewers can save named layouts (for example "Weekly review" or "Top stations") from the Layouts button and switch between them, update or undo changes to one, rename or delete it, or go back to the published layout. The chip shows which layout is active and whether it has been edited
+- Layouts live in the viewer's browser only, and the Layouts menu says so plainly: private windows, other computers and clearing cookies and site data won't have them. Export layouts saves them all to a small file that Import brings back on any browser or computer, or shares with a teammate. The first save shows a one-time tip about exporting, and if a browser blocks saving, the menu explains that too
 
 ## Totals rules
 

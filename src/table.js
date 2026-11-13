@@ -246,7 +246,7 @@
         const first = !this.store || this.store !== store;
         this.store = store;
         this.timing = timing;
-        if (first) this.loadLocalLayout();
+        if (first) { this.loadLocalLayout(); this.loadPresets(); }
         this.refresh();
         if (done) this.setStatus(null);
       }).catch(e => {
@@ -294,6 +294,7 @@
 
     resetLocal() {
       this.local = null;
+      if (this.presets && this.presets.active) { this.presets.active = null; this.savePresets(); }
       try { localStorage.removeItem(this.layoutKey()); } catch (e) { /* storage blocked */ }
       this.refresh();
     }
@@ -749,6 +750,7 @@
           <span class="tp-vfs"></span>
           <span class="tp-spacer"></span>
           <button class="tp-chip" type="button" hidden title="Your column changes are saved in this browser only">Custom layout · Reset</button>
+          <button class="tp-icon tp-lay" type="button" title="Layouts" aria-label="Layouts" hidden>${ICONS.lay}</button>
           <button class="tp-icon tp-cols" type="button" title="Show and hide columns" aria-label="Show and hide columns">${ICONS.cols}</button>
           <button class="tp-icon tp-dl" type="button" title="Download" aria-label="Download">${ICONS.dl}</button>
           <button class="tp-icon tp-gear" type="button" title="Format table" aria-label="Format table" hidden>${ICONS.gear}</button>
@@ -778,7 +780,8 @@
       this.scroller.addEventListener('scroll', () => { if (!this.raf) this.raf = requestAnimationFrame(() => { this.raf = 0; this.renderBody(false); }); });
       window.addEventListener('resize', () => this.refresh());
       this.searchEl.addEventListener('input', () => { clearTimeout(this.searchT); this.searchT = setTimeout(() => { this.search = this.searchEl.value.trim(); this.refresh(); }, 150); });
-      q('.tp-chip').addEventListener('click', () => this.resetLocal());
+      q('.tp-chip').addEventListener('click', e => { if (e.currentTarget.dataset.mode === 'menu') this.openPresets(e.currentTarget); else this.resetLocal(); });
+      q('.tp-lay').addEventListener('click', e => this.openPresets(e.currentTarget));
       q('.tp-vfs').addEventListener('click', e => { const b = e.target.closest('button[data-k]'); if (b) this.clearValueFilter(b.dataset.k); });
       q('.tp-cols').addEventListener('click', e => this.openColumnsPicker(e.currentTarget));
       q('.tp-dl').addEventListener('click', e => this.onDownloadClick(e.currentTarget));
@@ -833,7 +836,20 @@
       this.searchEl.hidden = !this.cfg.showSearch;
       q('.tp-gear').hidden = !this.authoring;
       q('.tp-cols').hidden = !this.canEditLayout();
-      q('.tp-chip').hidden = !(this.local && Object.keys(this.local).length) || this.authoring;
+      const chip = q('.tp-chip');
+      const act = this.presets && this.activePreset();
+      q('.tp-lay').hidden = this.authoring || !this.cfg.allowViewerLayout || !this.presets;
+      if (act && !this.authoring) {
+        chip.hidden = false;
+        chip.dataset.mode = 'menu';
+        chip.textContent = 'Layout: ' + act.name + (this.presetEdited(act) ? ' (edited)' : '');
+        chip.title = 'Your saved layout. Click for layouts.';
+      } else {
+        chip.hidden = !(this.local && Object.keys(this.local).length) || this.authoring;
+        chip.dataset.mode = 'reset';
+        chip.textContent = 'Custom layout · Reset';
+        chip.title = 'Your column changes are saved in this browser only';
+      }
       const t = this.timing;
       q('.tp-info').title = t ? 'Tableau query ' + (t.query / 1000).toFixed(2) + 's · all rows loaded ' + ((t.fetch || 0) / 1000).toFixed(2) + 's · last draw ' + Math.round(t.draw || 0) + ' ms' + (this.freezePaused ? '\nFreeze paused: frozen columns are wider than 60% of the table.' : '') : '';
     }
@@ -1536,6 +1552,166 @@
       return ok;
     }
 
+    note(msg, ms) {
+      this.setStatus(msg, false);
+      clearTimeout(this.flashT);
+      this.flashT = setTimeout(() => this.setStatus(null), ms || 6000);
+    }
+
+    // ---------- viewer layouts (presets) ----------
+
+    // Named layouts a viewer saves in their own browser, per worksheet and field list, like the working layout.
+    presetKey() { return this.layoutKey().replace('tp-layout:', 'tp-presets:'); }
+
+    loadPresets() {
+      this.presets = { list: [], active: null };
+      this.storageOk = true;
+      try { localStorage.setItem('tp-test', '1'); localStorage.removeItem('tp-test'); } catch (e) { this.storageOk = false; }
+      if (this.authoring || !this.cfg.allowViewerLayout) return;
+      try {
+        const p = JSON.parse(localStorage.getItem(this.presetKey()) || 'null');
+        if (p && Array.isArray(p.list)) this.presets = { list: p.list, active: p.active || null };
+      } catch (e) { /* keep empty */ }
+    }
+
+    // Presets stay in memory for the session even when the browser won't store them.
+    savePresets() {
+      try { localStorage.setItem(this.presetKey(), JSON.stringify(this.presets)); return true; } catch (e) { return false; }
+    }
+
+    activePreset() { return this.presets && this.presets.active ? this.presets.list.find(p => p.name === this.presets.active) || null : null; }
+
+    presetEdited(p) { return JSON.stringify(this.local || {}) !== JSON.stringify(p.layout || {}); }
+
+    setLocal(layout) {
+      this.local = layout && Object.keys(layout).length ? JSON.parse(JSON.stringify(layout)) : null;
+      try {
+        if (this.local) localStorage.setItem(this.layoutKey(), JSON.stringify(this.local)); else localStorage.removeItem(this.layoutKey());
+      } catch (e) { /* storage blocked */ }
+    }
+
+    applyPreset(name) {
+      const p = this.presets.list.find(x => x.name === name);
+      if (!p) return;
+      this.setLocal(p.layout);
+      this.presets.active = name;
+      this.savePresets();
+      this.collapsed = new Set();
+      this.refresh();
+    }
+
+    savePresetAs(name) {
+      name = String(name || '').trim().slice(0, 60);
+      if (!name) return;
+      const layout = JSON.parse(JSON.stringify(this.local || {}));
+      const at = this.presets.list.findIndex(x => x.name === name);
+      const entry = { name, layout, savedAt: new Date().toISOString() };
+      if (at >= 0) this.presets.list[at] = entry; else this.presets.list.push(entry);
+      this.presets.active = name;
+      this.savePresets();
+      this.refresh();
+      let tipped = false;
+      try { tipped = !!localStorage.getItem('tp-presets-tip'); if (!tipped) localStorage.setItem('tp-presets-tip', '1'); } catch (e) { tipped = true; }
+      if (!tipped) this.note('Saved "' + name + '". Tip: layouts live in this browser only, so export a backup if you\'d like to keep them safe.', 9000);
+      else this.flashOk('Saved "' + name + '"');
+    }
+
+    exportList() {
+      if (this.presets.list.length) return this.presets.list;
+      return this.local && Object.keys(this.local).length ? [{ name: 'My layout', layout: this.local }] : [];
+    }
+
+    exportPresets() {
+      const list = this.exportList();
+      if (!list.length) return;
+      const doc = { type: 'totals-table-layouts', v: 1, sheet: this.ws.name, exportedAt: new Date().toISOString(), layouts: list };
+      saveBlob(new Blob([JSON.stringify(doc, null, 2)], { type: 'application/json' }), TPExport.buildFileName('Table layouts {sheet}', { sheet: this.ws.name }, 'json'));
+    }
+
+    importPresets(text) {
+      let doc;
+      try { doc = JSON.parse(text); } catch (e) { doc = null; }
+      if (!doc || doc.type !== 'totals-table-layouts' || !Array.isArray(doc.layouts)) { this.flash('That file isn\'t a table layouts file.'); return; }
+      let n = 0;
+      for (const p of doc.layouts) {
+        if (!p || typeof p.name !== 'string' || !p.name.trim() || typeof p.layout !== 'object') continue;
+        const entry = { name: p.name.trim().slice(0, 60), layout: p.layout || {}, savedAt: p.savedAt || new Date().toISOString() };
+        const at = this.presets.list.findIndex(x => x.name === entry.name);
+        if (at >= 0) this.presets.list[at] = entry; else this.presets.list.push(entry);
+        n++;
+      }
+      this.savePresets();
+      this.refresh();
+      this.note(n + (n === 1 ? ' layout' : ' layouts') + ' restored.', 4000);
+    }
+
+    openPresets(anchor, mode, confirmDelete) {
+      const L = this.presets.list;
+      const act = this.activePreset();
+      const edited = act && this.presetEdited(act);
+      const hasLocal = !!(this.local && Object.keys(this.local).length);
+      const btn = (a, label, extra) => `<button type="button" data-a="${a}"${extra || ''}>${esc(label)}</button>`;
+      let h = '<div class="tp-menu tp-lays" role="menu"><div class="tp-ph">Layouts</div>';
+      h += btn('pub', (!act && !hasLocal ? '✓ ' : '') + 'Published layout');
+      L.forEach((p, i) => { h += btn('apply', (p === act ? '✓ ' : '') + p.name, ` data-i="${i}"`); });
+      h += '<hr>';
+      if (mode === 'save' || mode === 'rename') {
+        const val = mode === 'rename' && act ? act.name : '';
+        h += `<div class="tp-lname"><input type="text" maxlength="60" value="${esc(val)}" placeholder="Layout name" aria-label="Layout name"><button type="button" data-a="${mode}-ok">${mode === 'save' ? 'Save' : 'Rename'}</button></div>`;
+      } else h += btn('save', 'Save current layout as…');
+      if (act && edited) h += btn('update', 'Update "' + act.name + '" with your changes') + btn('undo', 'Undo changes to "' + act.name + '"');
+      if (act && mode !== 'rename') h += btn('rename', 'Rename "' + act.name + '"…') + btn('delete', (confirmDelete ? 'Click again to delete "' : 'Delete "') + act.name + '"');
+      h += '<hr>' + btn('export', 'Export layouts', this.exportList().length ? '' : ' disabled') + btn('import', 'Import layouts…') +
+        '<input type="file" accept=".json,application/json" hidden>';
+      h += '<div class="tp-lnote">' + (this.storageOk
+        ? 'Your layouts are saved in this browser. Private windows, other computers, and clearing cookies and site data won\'t have them. <button type="button" class="linkish" data-a="export">Export a backup</button> anytime.'
+        : 'This browser isn\'t letting the table save layouts right now, often because of a privacy setting. You can still arrange the table, and Export will keep a copy.') + '</div></div>';
+      this.openPop(anchor, h, pop => {
+        const input = pop.querySelector('.tp-lname input');
+        if (input) {
+          input.focus();
+          input.select();
+          input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); pop.querySelector('.tp-lname button').click(); } });
+        }
+        pop.querySelector('input[type="file"]').addEventListener('change', e => {
+          const f = e.target.files && e.target.files[0];
+          if (!f) return;
+          this.closePop();
+          f.text().then(t => this.importPresets(t));
+        });
+        pop.addEventListener('click', e => {
+          const b = e.target.closest('button[data-a]');
+          if (!b || b.disabled) return;
+          const a = b.dataset.a;
+          if (a === 'save' || a === 'rename') return this.openPresets(anchor, a);
+          if (a === 'delete' && !confirmDelete) return this.openPresets(anchor, null, true);
+          if (a === 'import') return pop.querySelector('input[type="file"]').click();
+          this.closePop();
+          if (a === 'pub') return this.resetLocal();
+          if (a === 'apply') return this.applyPreset(L[+b.dataset.i].name);
+          if (a === 'save-ok') return this.savePresetAs(input.value);
+          if (a === 'rename-ok') {
+            const name = input.value.trim().slice(0, 60);
+            if (!name || !act) return;
+            this.presets.list = L.filter(x => x === act || x.name !== name);
+            act.name = name;
+            this.presets.active = name;
+            this.savePresets();
+            return this.refresh();
+          }
+          if (a === 'update') { act.layout = JSON.parse(JSON.stringify(this.local || {})); act.savedAt = new Date().toISOString(); this.savePresets(); this.refresh(); return this.flashOk('Updated "' + act.name + '"'); }
+          if (a === 'undo') return this.applyPreset(act.name);
+          if (a === 'delete') {
+            this.presets.list = L.filter(x => x !== act);
+            this.presets.active = null;
+            this.savePresets();
+            return this.refresh();
+          }
+          if (a === 'export') return this.exportPresets();
+        });
+      });
+    }
+
     flashOk(msg) {
       this.setStatus(msg, false);
       clearTimeout(this.flashT);
@@ -2007,6 +2183,7 @@
 
   const ICONS = {
     dl: '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M8 1a.75.75 0 0 1 .75.75v6.69l2.22-2.22a.75.75 0 1 1 1.06 1.06l-3.5 3.5a.75.75 0 0 1-1.06 0l-3.5-3.5a.75.75 0 1 1 1.06-1.06l2.22 2.22V1.75A.75.75 0 0 1 8 1ZM2.75 12a.75.75 0 0 1 .75.75v.75h9v-.75a.75.75 0 0 1 1.5 0v1.5a.75.75 0 0 1-.75.75H2.75a.75.75 0 0 1-.75-.75v-1.5a.75.75 0 0 1 .75-.75Z"/></svg>',
+    lay: '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M4 1.5h8A1.5 1.5 0 0 1 13.5 3v11.2a.6.6 0 0 1-.95.49L8 11.5l-4.55 3.19a.6.6 0 0 1-.95-.49V3A1.5 1.5 0 0 1 4 1.5Zm0 1.5v9.9l3.57-2.5a.75.75 0 0 1 .86 0L12 12.9V3Z"/></svg>',
     cols: '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M1.75 2h12.5a.75.75 0 0 1 .75.75v10.5a.75.75 0 0 1-.75.75H1.75a.75.75 0 0 1-.75-.75V2.75A.75.75 0 0 1 1.75 2Zm.75 1.5v9h3v-9Zm4.5 0v9h2v-9Zm3.5 0v9h3v-9Z"/></svg>',
     gear: '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5ZM7 1h2l.4 1.9 1.3.6 1.7-1 1.4 1.4-1 1.7.6 1.3L15 7v2l-1.9.4-.6 1.3 1 1.7-1.4 1.4-1.7-1-1.3.6L9 15H7l-.4-1.9-1.3-.6-1.7 1-1.4-1.4 1-1.7-.6-1.3L1 9V7l1.9-.4.6-1.3-1-1.7 1.4-1.4 1.7 1 1.3-.6Z"/></svg>',
     info: '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M8 1a7 7 0 1 1 0 14A7 7 0 0 1 8 1Zm0 1.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11ZM8.75 7v4.25h-1.5V7ZM8 4.25a.9.9 0 1 1 0 1.8.9.9 0 0 1 0-1.8Z"/></svg>'

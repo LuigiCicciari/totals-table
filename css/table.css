@@ -141,3 +141,11 @@ button, input, select { font: inherit; color: inherit; }
 .tp-subnb .tp-grp { font-weight: 400; }
 .tp-hwrap .tp-hrow .tp-h { height: auto; min-height: var(--tp-row-h); line-height: 1.25; padding-top: 3px; padding-bottom: 3px; }
 .tp-hwrap .tp-hrow .tp-hl { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+/* Viewer layouts menu */
+.tp-lays { max-width: 330px; }
+.tp-lname { display: flex; gap: 4px; padding: 3px 6px; }
+.tp-lname input { flex: 1 1 auto; min-width: 0; padding: 3px 6px; border: 1px solid var(--tp-line-strong); border-radius: 4px; }
+.tp-menu .tp-lname button { background: var(--tp-accent); color: #fff; padding: 3px 10px; }
+.tp-lnote { font-size: 11px; color: var(--tp-muted); padding: 6px 10px 4px; white-space: normal; line-height: 1.4; }
+.tp-menu .tp-lnote button.linkish { display: inline; padding: 0; border-radius: 0; color: var(--tp-accent); text-decoration: underline; white-space: normal; font-size: inherit; }
+.tp-menu .tp-lnote button.linkish:hover { background: none; }
