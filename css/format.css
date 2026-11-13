@@ -44,3 +44,9 @@ table.cols select { max-width: 160px; }
 .resolves .prob { color: #9a6700; }
 ol.rules { padding-left: 22px; }
 ol.rules li { margin: 4px 0; }
+table.cols td.name { max-width: 160px; }
+table.cols input[type="text"] { width: 130px; }
+table.cols td .resolves { margin-top: 4px; max-width: 230px; }
+.linktext { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; font-size: 12px; color: #59636e; }
+.linktext input[type="text"] { width: 170px !important; color: #1f2328; }
+.hint { font-size: 11px; color: #59636e; margin-top: 2px; }

@@ -85,7 +85,7 @@
       return `<select data-i="${i}" data-k="urlMode" aria-label="Link display for ${esc(c.name)}">
           <option value="on"${l.mode !== 'off' ? ' selected' : ''}>Clickable</option>
           <option value="off"${l.mode === 'off' ? ' selected' : ''}>Not clickable</option>
-        </select>` + (l.mode !== 'off' ? `<div class="ratio"><input type="text" data-i="${i}" data-k="urlLabel" value="${esc(l.label || '')}" placeholder="Show the address" aria-label="Link text"></div>` : '');
+        </select>` + (l.mode !== 'off' ? `<label class="linktext">Link text <input type="text" data-i="${i}" data-k="urlLabel" value="${esc(l.label || '')}" placeholder="Optional, e.g. View"></label><div class="hint">Blank shows the full address.</div>` : '');
     }
     if (c.isNum) return '<span class="muted">—</span>';
     const urlCols = cols.filter(x => x.isUrl);
@@ -108,6 +108,7 @@
         ? `<select data-i="${i}" data-k="total">${R.TOTAL_TYPES.map(t => `<option value="${t}"${o.type === t ? ' selected' : ''}>${{ auto: 'Auto', sum: 'Sum', avg: 'Average', min: 'Minimum', max: 'Maximum', ratio: 'Ratio (A ÷ B)', none: 'None' }[t]}</option>`).join('')}</select>` +
           (o.type === 'ratio' ? `<div class="ratio"><select data-i="${i}" data-k="numKey" aria-label="Numerator">${numOptions(o.numKey)}</select> ÷ <select data-i="${i}" data-k="denKey" aria-label="Denominator">${numOptions(o.denKey)}</select> × <input type="text" data-i="${i}" data-k="multiplier" value="${esc(o.multiplier || 1)}" aria-label="Multiplier"></div>` : '')
         : '<span class="muted">—</span>';
+      const totalBlock = c.isNum ? totalCell + `<div class="resolves" id="res-${i}">${resolvesHtml(c)}</div>` : totalCell;
       return `<tr>
         <td class="name" title="${esc(c.key)}">${esc(c.name)}</td>
         <td><input type="text" data-i="${i}" data-k="label" value="${esc(labels[c.key] || '')}" placeholder="${esc(autoParam ? 'Parameter value' : c.name)}"></td>
@@ -116,8 +117,7 @@
           <option value="none"${linkSel === 'none' ? ' selected' : ''}>Don't link</option>
           ${params.map(p => `<option value="${esc(p)}"${linkSel === p ? ' selected' : ''}>${esc(p)}</option>`).join('')}
         </select></td>
-        <td>${totalCell}</td>
-        <td class="resolves" id="res-${i}">${resolvesHtml(c)}</td>
+        <td>${totalBlock}</td>
         <td>${linkCell(c, i)}</td>
         <td><input type="checkbox" data-i="${i}" data-k="hidden"${hidden.has(c.key) ? ' checked' : ''} aria-label="Hide ${esc(c.name)} by default"></td>
       </tr>`;

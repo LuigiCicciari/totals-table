@@ -1150,7 +1150,7 @@
         columns: this.store.columns.filter(c => !c.virtual).map(c => ({ key: c.key, name: c.name, isNum: c.isNum, dataType: c.dataType, isUrl: !!c.isUrl }))
       });
       const url = new URL('format.html' + window.location.search, window.location.href).href;
-      return tableau.extensions.ui.displayDialogAsync(url, payload, { width: 860, height: 680 })
+      return tableau.extensions.ui.displayDialogAsync(url, payload, { width: 1100, height: 760 })
         .then(() => { this.loadConfig(); this.refresh(); })
         .catch(err => {
           if (!(tableau.ErrorCodes && err.errorCode === tableau.ErrorCodes.DialogClosedByUser)) this.flash(err.message);
