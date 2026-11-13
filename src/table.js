@@ -25,7 +25,8 @@
       totalOverrides: {},
       rules: null,
       export: { formats: 'excel', excelTotals: true, subtotals: true, filename: '{sheet} {date}' },
-      layout: { order: [], hidden: [], widths: {}, labels: {}, freeze: 'auto', sort: null, groupBy: null }
+      links: {},
+      layout: { order: [], hidden: [], widths: {}, labels: {}, freeze: 'auto', sort: null, groupBy: null, pct: [] }
     };
   }
 
@@ -39,6 +40,7 @@
     out.layout = Object.assign(defaults().layout, saved.layout);
     out.headerLinks = saved.headerLinks || {};
     out.totalOverrides = saved.totalOverrides || {};
+    out.links = saved.links || {};
     return out;
   }
 
@@ -173,11 +175,68 @@
 
     orderedKeys() {
       const all = this.store.columns.map(c => c.key);
-      const saved = (this.layout.order || []).filter(k => all.includes(k));
-      return saved.concat(all.filter(k => !saved.includes(k)));
+      const out = (this.layout.order || []).filter(k => all.includes(k));
+      for (const c of this.store.columns) {
+        if (out.includes(c.key)) continue;
+        // A new % of total column goes right after the column it is based on.
+        const at = c.virtual ? out.indexOf(c.srcKey) : -1;
+        if (at >= 0) out.splice(at + 1, 0, c.key); else out.push(c.key);
+      }
+      return out;
     }
 
     colDef(key) { return this.store.columns.find(c => c.key === key); }
+
+    // ---------- % of total columns ----------
+
+    syncVirtual() {
+      const st = this.store;
+      const want = (this.layout.pct || []).filter(k => { const c = this.colDef(k); return c && c.isNum && !c.virtual; });
+      st.columns = st.columns.filter(c => !c.virtual || want.includes(c.srcKey));
+      for (const k of want) {
+        const key = '__pct:' + k;
+        if (st.columns.some(c => c.key === key)) continue;
+        const src = this.colDef(k);
+        st.columns.push({ key, name: src.name + ' % of total', virtual: true, srcKey: k, isNum: true, dataType: 'float', spec: { cur: '', pct: true, dec: 2, group: false, scale: '', neg: 'minus' }, excelFmt: '0.00%;-0.00%' });
+        st.raw[key] = new Array(st.n).fill(NaN);
+        st.fmt[key] = new Array(st.n).fill(null);
+      }
+    }
+
+    // Shares are of the filtered total, so they always add up to 100% of what is on screen.
+    fillVirtual(idx) {
+      const st = this.store;
+      for (const c of st.columns) {
+        if (!c.virtual) continue;
+        const src = st.raw[c.srcKey], raw = st.raw[c.key], fmt = st.fmt[c.key];
+        if (raw.length !== st.n) { raw.length = st.n; fmt.length = st.n; }
+        let total = 0;
+        for (const i of idx) { const v = src[i]; if (v === v) total += v; }
+        for (let i = 0; i < st.n; i++) {
+          const v = src[i];
+          const share = v === v && total ? v / total : NaN;
+          raw[i] = share;
+          fmt[i] = share === share ? R.formatNumber(share, c.spec) : null;
+        }
+      }
+    }
+
+    // ---------- links ----------
+
+    safeUrl(s) {
+      if (!s) return null;
+      try {
+        const u = new URL(String(s).trim());
+        return u.protocol === 'http:' || u.protocol === 'https:' ? u.href : null;
+      } catch (e) { return null; }
+    }
+
+    linkFor(c) {
+      const l = this.cfg.links[c.key] || {};
+      if (c.isUrl) return l.mode === 'off' ? null : { urlKey: c.key, label: l.label || '' };
+      if (l.linkTo && this.colDef(l.linkTo)) return { urlKey: l.linkTo, label: '' };
+      return null;
+    }
 
     paramFor(col) {
       const link = this.cfg.headerLinks[col.key];
@@ -189,6 +248,7 @@
     labelFor(col) {
       const l = this.layout.labels && this.layout.labels[col.key];
       if (l) return l;
+      if (col.virtual) { const src = this.colDef(col.srcKey); return (src ? this.labelFor(src) : col.name.replace(/ % of total$/, '')) + ' % of total'; }
       const p = this.paramFor(col);
       return p ? p.value : col.name;
     }
@@ -217,6 +277,7 @@
     computeView() {
       const st = this.store;
       const lay = this.layout;
+      this.syncVirtual();
       const hidden = new Set(lay.hidden || []);
       const cols = [];
       for (const k of this.orderedKeys()) {
@@ -237,6 +298,7 @@
       this.frozenWidth = left;
 
       const idx = this.filterRows(cols);
+      this.fillVirtual(idx);
       this.sortRows(idx, lay.sort, cols);
       const totals = this.computeTotals(cols, idx);
       const disp = this.groupRows(cols, idx, lay.groupBy);
@@ -264,7 +326,7 @@
       const tests = [];
       const mode = this.cfg.filterMode;
       for (const c of cols) {
-        const f = this.filters[c.key];
+        const f = !c.virtual && this.filters[c.key];
         if (!f) continue;
         if (c.isNum && (f.min !== '' && f.min != null || f.max !== '' && f.max != null)) {
           const lo = f.min === '' || f.min == null ? -Infinity : Number(f.min);
@@ -340,6 +402,7 @@
     }
 
     totalSpec(c) {
+      if (c.virtual) return { type: 'sum', source: 'pct', text: 'Share of the filtered total' };
       const t = R.resolveTotal(c, this.store.columns, this.cfg.rules && this.cfg.rules.doc, this.cfg.totalOverrides[c.key]);
       t.text = R.describeTotal(t, this.store.columns);
       return t;
@@ -520,6 +583,7 @@
         h += '<div class="tp-frow">';
         cols.forEach((c, i) => {
           const f = this.filters[c.key] || {};
+          if (c.virtual) { h += `<div ${this.cellAttrs(c, 'tp-f')}></div>`; return; }
           h += `<div ${this.cellAttrs(c, 'tp-f')}>` + (c.isNum
             ? `<input data-i="${i}" data-k="min" type="number" step="any" placeholder="min" value="${esc(f.min || '')}" aria-label="Minimum ${esc(c.label)}"><input data-i="${i}" data-k="max" type="number" step="any" placeholder="max" value="${esc(f.max || '')}" aria-label="Maximum ${esc(c.label)}">`
             : `<input data-i="${i}" data-k="text" type="search" placeholder="Filter" value="${esc(f.text || '')}" aria-label="Filter ${esc(c.label)}">`) + '</div>';
@@ -577,6 +641,7 @@
       const st = this.store;
       const nulls = cols.map(c => esc(this.nullFor(c)));
       const fmts = cols.map(c => st.fmt[c.key]);
+      const links = cols.map(c => { const l = this.linkFor(c); return l ? { urls: st.fmt[l.urlKey], label: l.label } : null; });
       const rg = this.normRange();
       let h = '';
       for (let r = start; r < end; r++) {
@@ -597,7 +662,11 @@
         for (let j = 0; j < cols.length; j++) {
           const v = fmts[j][d];
           const inRange = rg && r >= rg.r0 && r <= rg.r1 && j >= rg.c0 && j <= rg.c1;
-          h += `<div ${this.cellAttrs(cols[j], (v == null ? 'nul' : '') + (inRange ? ' rg' : ''))} data-c="${j}">${v == null ? nulls[j] : esc(v)}</div>`;
+          let inner = v == null ? nulls[j] : esc(v);
+          const lk = links[j];
+          const url = lk && this.safeUrl(lk.urls[d]);
+          if (url && (v != null || lk.label)) inner = `<a class="tp-link" href="${esc(url)}" target="_blank" rel="noopener noreferrer" title="${esc(url)}">${esc(lk.label || v)}</a>`;
+          h += `<div ${this.cellAttrs(cols[j], (v == null ? 'nul' : '') + (inRange ? ' rg' : ''))} data-c="${j}">${inner}</div>`;
         }
         h += '</div>';
       }
@@ -765,7 +834,8 @@
 
     wireBody() {
       this.rowsEl.addEventListener('mousedown', e => {
-        if (e.button !== 0) return;
+        // A link click opens the link and nothing else: no selection, no redraw that would swallow the click.
+        if (e.button !== 0 || e.target.closest('a.tp-link')) return;
         const r = this.rowAt(e.target);
         const cell = e.target.closest('[data-c]');
         if (r < 0 || !cell) return;
@@ -785,6 +855,7 @@
         this.hover(e);
       });
       this.rowsEl.addEventListener('mouseup', e => {
+        if (e.target.closest('a.tp-link')) { this.dragStart = null; return; }
         const ds = this.dragStart;
         this.dragStart = null;
         if (!ds || ds.moved || e.shiftKey) { this.renderBody(true); return; }
@@ -983,6 +1054,10 @@
           lay.groupBy === c.key ? ['collapse-all', 'Collapse all'] : null,
           lay.groupBy === c.key ? ['expand-all', 'Expand all'] : null, '-',
           ['rename', 'Rename…'], lay.labels && lay.labels[c.key] ? ['unrename', 'Reset name'] : null);
+        // Shares only make sense for columns that add up, so ratio columns don't offer it.
+        const hasPct = (lay.pct || []).includes(c.key);
+        if (c.virtual) items.push('-', ['pct-remove', 'Remove % of total column']);
+        else if (c.isNum && (hasPct || (c.total && c.total.type === 'sum'))) items.push('-', [hasPct ? 'pct-remove' : 'pct-add', hasPct ? 'Remove % of total column' : 'Add % of total column']);
       }
       if (c.isNum && c.total) items.push('-', ['info', 'Total: ' + c.total.text + (c.total.problem ? ' (' + c.total.problem + ')' : ''), true]);
       if (this.authoring) items.push(['format', 'Format table…']);
@@ -1033,6 +1108,11 @@
           return this.updateLayout({ labels });
         }
         case 'format': return this.openFormat();
+        case 'pct-add': return this.updateLayout({ pct: (lay.pct || []).concat(c.key) });
+        case 'pct-remove': {
+          const src = c.virtual ? c.srcKey : c.key;
+          return this.updateLayout({ pct: (lay.pct || []).filter(k => k !== src) });
+        }
         default:
       }
     }
@@ -1067,7 +1147,7 @@
         config: this.cfg,
         sheet: this.ws.name,
         params: this.params.map(p => p.name),
-        columns: this.store.columns.map(c => ({ key: c.key, name: c.name, isNum: c.isNum, dataType: c.dataType }))
+        columns: this.store.columns.filter(c => !c.virtual).map(c => ({ key: c.key, name: c.name, isNum: c.isNum, dataType: c.dataType, isUrl: !!c.isUrl }))
       });
       const url = new URL('format.html' + window.location.search, window.location.href).href;
       return tableau.extensions.ui.displayDialogAsync(url, payload, { width: 860, height: 680 })
@@ -1097,6 +1177,10 @@
         const d = st.dates[c.key];
         if (d) { const v = d[i]; return v == null ? { kind: 'null' } : { kind: 'date', v, time: /hh/.test(c.excelFmt || '') }; }
         const f = st.fmt[c.key][i];
+        const lk = this.linkFor(c);
+        const url = lk && this.safeUrl(st.fmt[lk.urlKey][i]);
+        // Excel gets a real hyperlink; CSV keeps the plain address in URL columns and the plain text elsewhere.
+        if (url && (f != null || lk.label)) return { kind: 'link', v: lk.label || f, url, csv: f };
         return f == null ? { kind: 'null' } : { kind: 'text', v: f };
       };
       const groupKey = this.layout.groupBy;

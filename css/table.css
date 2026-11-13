@@ -87,3 +87,5 @@ button, input, select { font: inherit; color: inherit; }
 .tp-dragging, .tp-dragging * { cursor: grabbing !important; user-select: none; }
 .tp-scroll { user-select: none; }
 .tp-scroll input { user-select: text; }
+.tp-link { color: var(--tp-accent); text-decoration: underline; cursor: pointer; }
+.tp-link:hover { text-decoration-thickness: 2px; }

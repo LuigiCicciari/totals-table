@@ -67,6 +67,14 @@
           for (let i = 0; i < limit && f.length < 20; i++) if (fmt[i]) f.push(fmt[i]);
           c.excelFmt = R.inferDateFmt(f, c.dataType === 'date-time');
         } else {
+          let seen = 0, urls = 0;
+          for (let i = 0; i < limit && seen < 200; i++) {
+            const s = fmt[i];
+            if (s == null || s === '') continue;
+            seen++;
+            if (/^https?:\/\/\S+$/i.test(s.trim())) urls++; else break;
+          }
+          c.isUrl = seen > 0 && urls === seen;
           let nonNull = 0, iso = 0, time = false;
           for (let i = 0; i < limit; i++) {
             const s = fmt[i];

@@ -34,6 +34,7 @@
       case 'num': return String(roundAsShown(cell.v, col.spec));
       case 'date': return isoFromMs(cell.v, cell.time);
       case 'text': return cleanText(cell.v);
+      case 'link': return cleanText(cell.csv != null ? cell.csv : cell.v);
       default: return '';
     }
   }
@@ -75,6 +76,7 @@
         case 'num': return cell.v;
         case 'date': return new Date(cell.v);
         case 'text': return cleanText(cell.v);
+        case 'link': return { text: cleanText(cell.v), hyperlink: cell.url };
         default: return null;
       }
     };
@@ -105,7 +107,9 @@
         if (!outline) continue;
         styleRow(ws.addRow(totalsValues(r.totals, r.label)), 'group');
       } else {
-        const row = ws.addRow(cols.map(c => xlCell(snap.value(c, r.i), c)));
+        const vals = cols.map(c => xlCell(snap.value(c, r.i), c));
+        const row = ws.addRow(vals);
+        vals.forEach((v, k) => { if (v && v.hyperlink) row.getCell(k + 1).font = { color: { argb: 'FF0563C1' }, underline: true }; });
         if (outline && r.level) {
           row.outlineLevel = r.level;
           if (r.hidden) row.hidden = true;

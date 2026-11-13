@@ -10,6 +10,8 @@ A fast table for Tableau worksheets, with correct totals for ratio columns, head
 - Optional filter row under the headers (text: contains, starts with or exact; numbers: min/max) and optional search box, both turned on in Format → Display
 - Frozen header and totals row. Parameter-driven columns are frozen by default; drag the freeze line or use "Freeze up to here"
 - Optional subtotals by any text column. Click a group row to collapse it, or use Collapse all / Expand all in that column's menu. Sorting a number column orders the groups by their subtotal and the rows within each group; sorting the subtotalled column orders the groups by name
+- Links: columns holding web addresses are clickable automatically and open in a new tab. In Format → Columns & totals, a link column can show a fixed label (such as "View") instead of the address, or any text column can link to a web-address column, so a name opens its page while the address column stays hidden. Only http and https addresses become links
+- % of total: any column that sums can get a companion "% of total" column from its menu. Shares are of the filtered total, and subtotal rows show each group's share
 - Right-click to copy cells, cells with headers, or the whole table (data rows only, in on-screen order). Tableau Desktop keeps Ctrl+C for itself, so right-click is the reliable way
 - Tableau tooltips on hover, mark selection on click (Ctrl/Cmd-click adds), so dashboard actions keep working
 - Only the rows on screen are drawn, so large tables scroll smoothly. Rows appear while the rest are still loading
@@ -28,6 +30,7 @@ A fast table for Tableau worksheets, with correct totals for ratio columns, head
 **Downloads**
 - Excel, CSV or both (both shows a small menu)
 - What is on screen: visible columns, in order, with the current sort and filters
+- Links come out as clickable hyperlinks in Excel and as plain text or addresses in CSV
 - Excel: plain values, never formulas; Tableau's number formats carried over ($, %, thousands, decimals, K/M/B); real dates, including text columns that hold ISO dates (such as `STR([Date])`); bold header and totals; frozen header and frozen columns
 - CSV: raw data only. Every row, never totals or subtotals. UTF-8, numbers rounded to what the table shows, dates as `yyyy-mm-dd`
 - Collapsed subtotal groups never hide rows from a download. In Excel, subtotal rows sit above their rows, grouped with Excel's +/- outline, and groups collapsed in the table start collapsed in the file

@@ -78,6 +78,24 @@
     return '<option value="">Choose…</option>' + cols.filter(c => c.isNum).map(c => `<option value="${esc(c.key)}"${c.key === selected ? ' selected' : ''}>${esc(c.name)}</option>`).join('');
   }
 
+  // Web-address columns are clickable by default; any text column can link to one of them instead.
+  function linkCell(c, i) {
+    const l = cfg.links[c.key] || {};
+    if (c.isUrl) {
+      return `<select data-i="${i}" data-k="urlMode" aria-label="Link display for ${esc(c.name)}">
+          <option value="on"${l.mode !== 'off' ? ' selected' : ''}>Clickable</option>
+          <option value="off"${l.mode === 'off' ? ' selected' : ''}>Not clickable</option>
+        </select>` + (l.mode !== 'off' ? `<div class="ratio"><input type="text" data-i="${i}" data-k="urlLabel" value="${esc(l.label || '')}" placeholder="Show the address" aria-label="Link text"></div>` : '');
+    }
+    if (c.isNum) return '<span class="muted">—</span>';
+    const urlCols = cols.filter(x => x.isUrl);
+    if (!urlCols.length) return '<span class="muted">No web-address fields</span>';
+    return `<select data-i="${i}" data-k="linkTo" aria-label="Link ${esc(c.name)} to">
+        <option value="">No link</option>
+        ${urlCols.map(u => `<option value="${esc(u.key)}"${l.linkTo === u.key ? ' selected' : ''}>Link to ${esc(u.name)}</option>`).join('')}
+      </select>`;
+  }
+
   function renderColumns() {
     const hidden = new Set(cfg.layout.hidden || []);
     const labels = cfg.layout.labels || {};
@@ -100,6 +118,7 @@
         </select></td>
         <td>${totalCell}</td>
         <td class="resolves" id="res-${i}">${resolvesHtml(c)}</td>
+        <td>${linkCell(c, i)}</td>
         <td><input type="checkbox" data-i="${i}" data-k="hidden"${hidden.has(c.key) ? ' checked' : ''} aria-label="Hide ${esc(c.name)} by default"></td>
       </tr>`;
     }).join('');
@@ -118,6 +137,15 @@
     if (k === 'link') {
       if (el.value === 'auto') delete cfg.headerLinks[c.key];
       else cfg.headerLinks[c.key] = el.value === 'none' ? '' : el.value;
+      return;
+    }
+    if (k === 'urlMode' || k === 'urlLabel' || k === 'linkTo') {
+      const l = Object.assign({}, cfg.links[c.key]);
+      if (k === 'urlMode') { if (el.value === 'off') l.mode = 'off'; else delete l.mode; }
+      if (k === 'urlLabel') { if (el.value.trim()) l.label = el.value.trim(); else delete l.label; }
+      if (k === 'linkTo') { if (el.value) l.linkTo = el.value; else delete l.linkTo; }
+      if (Object.keys(l).length) cfg.links[c.key] = l; else delete cfg.links[c.key];
+      if (k === 'urlMode') renderColumns();
       return;
     }
     if (k === 'hidden') {
@@ -201,7 +229,7 @@
   function wire() {
     document.querySelectorAll('[role="tab"]').forEach(t => t.addEventListener('click', () => { readSimple(); showTab(t.dataset.tab); }));
     $('colRows').addEventListener('change', onColumnChange);
-    $('colRows').addEventListener('input', e => { if (e.target.dataset.k === 'label' || e.target.dataset.k === 'multiplier') onColumnChange(e); });
+    $('colRows').addEventListener('input', e => { if (['label', 'multiplier', 'urlLabel'].includes(e.target.dataset.k)) onColumnChange(e); });
     $('filename').addEventListener('input', preview);
     $('rulesFile').addEventListener('change', e => {
       const f = e.target.files && e.target.files[0];
