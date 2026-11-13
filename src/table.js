@@ -265,7 +265,12 @@
         raw.fill(NaN);
         if (c.vkind === 'rank') {
           const dir = c.dir === 'asc' ? 1 : -1;
-          const rows = idx.filter(i => src[i] === src[i]).sort((a, b) => dir * (src[a] - src[b]));
+          // A zero usually means no activity (a cost-per of $0 when nothing came in), so zeros always rank last,
+          // tied with each other, whichever direction is best. Blanks get no rank.
+          const rows = idx.filter(i => src[i] === src[i]).sort((a, b) => {
+            const za = src[a] === 0, zb = src[b] === 0;
+            return za !== zb ? (za ? 1 : -1) : dir * (src[a] - src[b]);
+          });
           rows.forEach((i, k) => { raw[i] = k && src[i] === src[rows[k - 1]] ? raw[rows[k - 1]] : k + 1; });
         } else if (c.vkind === 'diff' || c.vkind === 'pdiff') {
           const oth = st.raw[c.otherKey];
@@ -529,7 +534,7 @@
 
     totalSpec(c) {
       if (c.virtual) {
-        if (c.vkind === 'rank') return { type: 'none', source: 'calc', text: 'No total for a rank' };
+        if (c.vkind === 'rank') return { type: 'none', source: 'calc', text: 'No total for a rank; zeros rank last and blanks are not ranked' };
         if (c.vkind === 'run') return { type: 'none', source: 'calc', text: 'No total for a running total' };
         if (c.vkind === 'diff' || c.vkind === 'pdiff') {
           const a = this.colDef(c.srcKey), b = this.colDef(c.otherKey);
@@ -1577,8 +1582,9 @@
           counts.set(v, (counts.get(v) || 0) + 1);
         }
         lines.push(['Distinct values', count(counts.size)], ['Blank', count(blank)]);
-        const top = Array.from(counts).sort((a, b) => b[1] - a[1] || collator.compare(a[0], b[0])).slice(0, 5);
-        top.forEach(([v, k], j) => lines.push([j ? '' : 'Most common', v + ' (' + count(k) + ')']));
+        // Only worth showing when some value repeats; otherwise it would list five arbitrary names.
+        const top = Array.from(counts).filter(x => x[1] > 1).sort((a, b) => b[1] - a[1] || collator.compare(a[0], b[0])).slice(0, 5);
+        top.forEach(([v, k], j) => lines.push([j ? '' : 'Most common', v + ' (' + count(k) + ' rows)']));
       }
       return lines;
     }
