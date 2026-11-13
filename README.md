@@ -6,9 +6,10 @@ A fast table for Tableau worksheets, with correct totals for ratio columns, head
 
 **Table**
 - Columns: drag to reorder, move first/left/right/last, hide, show/hide picker, resize, rename/reset name
-- Sorting (click a header), per-column filters (text: contains, starts with or exact; numbers: min/max), optional search box
+- Rows load A to Z by the text columns on the left, like a crosstab. Click a header to sort (text A to Z first, numbers largest first); viewers can always sort
+- Per-column filters (text: contains, starts with or exact; numbers: min/max), optional search box
 - Frozen header and totals row. Parameter-driven columns are frozen by default; drag the freeze line or use "Freeze up to here"
-- Optional subtotals by any text column. Click a group row to collapse it, or use Collapse all / Expand all in that column's menu
+- Optional subtotals by any text column. Click a group row to collapse it, or use Collapse all / Expand all in that column's menu. Sorting a number column orders the groups by their subtotal and the rows within each group; sorting the subtotalled column orders the groups by name
 - Right-click to copy cells, cells with headers, or the whole table (data rows only, in on-screen order). Tableau Desktop keeps Ctrl+C for itself, so right-click is the reliable way
 - Tableau tooltips on hover, mark selection on click (Ctrl/Cmd-click adds), so dashboard actions keep working
 - Only the rows on screen are drawn, so large tables scroll smoothly. Rows appear while the rest are still loading
@@ -72,7 +73,7 @@ On Tableau Cloud, a site admin must add the extension's address to the site's al
 
 ## Status
 
-Tested in Tableau Desktop: loading and field carry-over, parameter headers, freezing, sorting, filters, column dragging, totals and subtotals, collapsing, right-click copy, and Excel and CSV downloads. Still to confirm: Tableau Cloud, and whether the Tableau tooltip clears on mouse-out.
+Tested in Tableau Desktop and Tableau Cloud: loading and field carry-over, parameter headers, freezing, sorting, filters, column dragging, totals and subtotals, collapsing, right-click copy, Excel and CSV downloads, and viewer layouts. Still to confirm: whether the Tableau tooltip clears on mouse-out.
 
 ## Libraries
 
