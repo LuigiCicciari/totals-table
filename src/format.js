@@ -113,6 +113,7 @@
       return `<tr>
         <td class="name" title="${esc(c.key)}">${esc(c.name)}</td>
         <td><input type="text" data-i="${i}" data-k="label" value="${esc(labels[c.key] || '')}" placeholder="${esc(autoParam ? 'Parameter value' : c.name)}"></td>
+        <td><input type="text" class="grp" data-i="${i}" data-k="group" list="groupList" value="${esc(cfg.colGroups[c.key] || '')}" placeholder="None" aria-label="Group for ${esc(c.name)}"></td>
         <td><select data-i="${i}" data-k="link">
           <option value="auto"${linkSel === 'auto' ? ' selected' : ''}>Auto${autoParam ? ' (' + esc(autoParam) + ')' : ' (none found)'}</option>
           <option value="none"${linkSel === 'none' ? ' selected' : ''}>Don't link</option>
@@ -123,6 +124,12 @@
         <td><input type="checkbox" data-i="${i}" data-k="hidden"${hidden.has(c.key) ? ' checked' : ''} aria-label="Hide ${esc(c.name)} by default"></td>
       </tr>`;
     }).join('');
+    fillGroupList();
+  }
+
+  function fillGroupList() {
+    const names = Array.from(new Set(Object.values(cfg.colGroups).filter(Boolean)));
+    $('groupList').innerHTML = names.map(n => `<option value="${esc(n)}"></option>`).join('');
   }
 
   function onColumnChange(e) {
@@ -130,6 +137,12 @@
     if (!el.dataset || el.dataset.i == null) return;
     const c = cols[+el.dataset.i];
     const k = el.dataset.k;
+    if (k === 'group') {
+      cfg.colGroups = Object.assign({}, cfg.colGroups);
+      if (el.value.trim()) cfg.colGroups[c.key] = el.value.trim(); else delete cfg.colGroups[c.key];
+      if (e.type === 'change') fillGroupList();
+      return;
+    }
     if (k === 'label') {
       cfg.layout.labels = Object.assign({}, cfg.layout.labels);
       if (el.value.trim()) cfg.layout.labels[c.key] = el.value.trim(); else delete cfg.layout.labels[c.key];
@@ -307,7 +320,7 @@
     $('colRows').addEventListener('change', onColumnChange);
     $('cfRows').addEventListener('change', onCfChange);
     $('cfRows').addEventListener('input', e => { if (/Value$/.test(e.target.dataset.k || '')) onCfChange(e); });
-    $('colRows').addEventListener('input', e => { if (['label', 'multiplier', 'urlLabel'].includes(e.target.dataset.k)) onColumnChange(e); });
+    $('colRows').addEventListener('input', e => { if (['label', 'group', 'multiplier', 'urlLabel'].includes(e.target.dataset.k)) onColumnChange(e); });
     $('filename').addEventListener('input', preview);
     $('rulesFile').addEventListener('change', e => {
       const f = e.target.files && e.target.files[0];

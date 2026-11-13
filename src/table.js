@@ -27,7 +27,8 @@
       export: { formats: 'excel', excelTotals: true, subtotals: true, filename: '{sheet} {date}' },
       links: {},
       cf: {},
-      layout: { order: [], hidden: [], widths: {}, labels: {}, freeze: 'auto', sort: null, groupBy: null, pct: [], cfOff: [] }
+      colGroups: {},
+      layout: { order: [], hidden: [], widths: {}, labels: {}, freeze: 'auto', sort: null, groupBy: null, pct: [], cfOff: [], hideGroups: false }
     };
   }
 
@@ -43,6 +44,7 @@
     out.totalOverrides = saved.totalOverrides || {};
     out.links = saved.links || {};
     out.cf = saved.cf || {};
+    out.colGroups = saved.colGroups || {};
     return out;
   }
 
@@ -322,7 +324,44 @@
       const totals = this.computeTotals(cols, idx);
       this.computeCfStats(cols, idx);
       const disp = this.groupRows(cols, idx, lay.groupBy);
-      this.view = { cols, idx, disp, totals, nFrozen };
+      this.view = { cols, idx, disp, totals, nFrozen, spans: this.groupSpans(cols) };
+    }
+
+    // ---------- column groups ----------
+
+    // Membership is set by the author and never changes when columns move; the header spans each run of
+    // adjacent members, so a member moved away shows the label again in its new spot.
+    groupOf(c) { return (c.virtual ? this.cfg.colGroups[c.srcKey] : this.cfg.colGroups[c.key]) || ''; }
+
+    groupNames() {
+      const seen = [];
+      for (const k of this.orderedKeys()) {
+        const c = this.colDef(k);
+        const g = c && this.groupOf(c);
+        if (g && !seen.includes(g)) seen.push(g);
+      }
+      return seen;
+    }
+
+    groupSpans(cols) {
+      if (this.layout.hideGroups || !cols.some(c => this.groupOf(c))) return null;
+      const spans = [];
+      cols.forEach((c, i) => {
+        const g = this.groupOf(c), last = spans[spans.length - 1];
+        if (last && last.label === g && last.frozen === c.frozen) last.end = i;
+        else spans.push({ label: g, start: i, end: i, frozen: c.frozen });
+      });
+      return spans;
+    }
+
+    setGroups(change) {
+      if (!this.authoring) return;
+      const g = Object.assign({}, this.cfg.colGroups);
+      change(g);
+      Object.keys(g).forEach(k => { if (!g[k]) delete g[k]; });
+      this.cfg.colGroups = g;
+      this.saveConfig();
+      this.refresh();
     }
 
     frozenCount(cols) {
@@ -688,7 +727,20 @@
       this.grid.style.width = cols.reduce((s, c) => s + c.w, 0) + 'px';
       const sort = this.layout.sort || {};
       const canEdit = this.canEditLayout();
-      let h = '<div class="tp-hrow">';
+      let h = '';
+      if (this.view.spans) {
+        h += '<div class="tp-grow">';
+        for (const s of this.view.spans) {
+          const c0 = cols[s.start];
+          const cls = 'tp-c tp-g' + (s.label ? (canEdit ? ' mv' : '') : ' empty') + (s.frozen ? ' fz' : '') + (s.frozen && s.end === this.view.nFrozen - 1 ? ' fz-edge' : '');
+          const style = `grid-column:${s.start + 1} / ${s.end + 2};` + (s.frozen ? 'left:' + c0.left + 'px;' : '');
+          h += `<div class="${cls}" style="${style}" data-s="${s.start}" data-e="${s.end}"` +
+            (s.label ? ` title="${esc(s.label + (canEdit ? '\nDrag to move this group' : ''))}">` +
+              `<span class="tp-gl">${esc(s.label)}</span><button class="tp-hm tp-gm" type="button" data-s="${s.start}" aria-label="Group menu for ${esc(s.label)}">▾</button>` : '>') + '</div>';
+        }
+        h += '</div>';
+      }
+      h += '<div class="tp-hrow">';
       cols.forEach((c, i) => {
         const arrow = sort.key === c.key ? (sort.dir === 'desc' ? ' ▼' : ' ▲') : '';
         const sortTip = sort.key === c.key ? '\nSorted ' + (c.isNum ? (sort.dir === 'desc' ? 'largest to smallest' : 'smallest to largest') : (sort.dir === 'desc' ? 'Z to A' : 'A to Z')) : '';
@@ -804,6 +856,8 @@
 
     wireHead() {
       this.head.addEventListener('click', e => {
+        const gm = e.target.closest('.tp-gm');
+        if (gm) { this.openGroupMenu(+gm.dataset.s, gm); return; }
         const menu = e.target.closest('.tp-hm');
         if (menu) { this.openColumnMenu(+menu.dataset.i, menu); return; }
         if (this.suppressClick || e.target.closest('.tp-rz,.tp-fzh,input')) return;
@@ -837,13 +891,17 @@
         if (rz) return this.startResize(e, +rz.dataset.i);
         if (e.target.closest('.tp-fzh')) return this.startFreezeDrag(e);
         if (e.target.closest('.tp-hm,input')) return;
+        const grp = e.target.closest('.tp-g.mv');
+        if (grp) return this.startColumnDrag(e, +grp.dataset.s, +grp.dataset.e);
         const cell = e.target.closest('.tp-h');
         if (cell && this.canEditLayout()) this.startColumnDrag(e, +cell.dataset.i);
       });
     }
 
     // Pointer-based dragging; native HTML drag-and-drop hands text to Tableau, which tries to open it as a data file.
-    startColumnDrag(e, from) {
+    // A group header drags its whole run of columns (from..last) as one block.
+    startColumnDrag(e, from, last) {
+      if (last == null) last = from;
       e.preventDefault();
       const x0 = e.clientX;
       const gridLeft = this.grid.getBoundingClientRect().left;
@@ -873,6 +931,7 @@
         this.grid.classList.remove('tp-dragging');
         this.suppressClick = true;
         setTimeout(() => { this.suppressClick = false; }, 0);
+        if (last !== from) return this.moveBlock(from, last, gap);
         const to = gap > from ? gap - 1 : gap;
         if (to !== from) this.moveColumn(from, to);
       };
@@ -903,6 +962,17 @@
       order.splice(order.indexOf(k), 1);
       const ti = order.indexOf(target);
       order.splice(fromVis < toVis ? ti + 1 : ti, 0, k);
+      this.updateLayout({ order });
+    }
+
+    // Moves visible columns from..last so they start at visible gap position `gap` (0..cols.length).
+    moveBlock(from, last, gap) {
+      const cols = this.view.cols;
+      if (gap >= from && gap <= last + 1) return;
+      const keys = cols.slice(from, last + 1).map(c => c.key);
+      const order = this.orderedKeys().filter(k => !keys.includes(k));
+      const at = gap < cols.length ? order.indexOf(cols[gap].key) : order.indexOf(cols[cols.length - 1].key) + 1;
+      order.splice(at, 0, ...keys);
       this.updateLayout({ order });
     }
 
@@ -1187,6 +1257,11 @@
           const off = (lay.cfOff || []).includes(c.key);
           items.push('-', [off ? 'cf-show' : 'cf-hide', off ? 'Show formatting' : 'Hide formatting']);
         }
+        if (this.authoring && !c.virtual) {
+          const cur = this.cfg.colGroups[c.key];
+          items.push('-', ...this.groupNames().filter(n => n !== cur).slice(0, 8).map(n => ['g-add:' + n, 'Add to group "' + n + '"']),
+            ['g-new', 'New group…'], cur ? ['g-out', 'Remove from group "' + cur + '"'] : null);
+        }
         const hasPct = (lay.pct || []).includes(c.key);
         if (c.virtual) items.push('-', ['pct-remove', 'Remove % of total column']);
         else if (c.isNum && (hasPct || (c.total && c.total.type === 'sum'))) items.push('-', [hasPct ? 'pct-remove' : 'pct-add', hasPct ? 'Remove % of total column' : 'Add % of total column']);
@@ -1242,13 +1317,44 @@
         case 'format': return this.openFormat();
         case 'cf-hide': return this.updateLayout({ cfOff: (lay.cfOff || []).concat(c.key) });
         case 'cf-show': return this.updateLayout({ cfOff: (lay.cfOff || []).filter(k => k !== c.key) });
+        case 'g-new': {
+          const name = window.prompt('Group name (shown above this column)', '');
+          if (!name || !name.trim()) return;
+          return this.setGroups(g => { g[c.key] = name.trim(); });
+        }
+        case 'g-out': return this.setGroups(g => { delete g[c.key]; });
         case 'pct-add': return this.updateLayout({ pct: (lay.pct || []).concat(c.key) });
         case 'pct-remove': {
           const src = c.virtual ? c.srcKey : c.key;
           return this.updateLayout({ pct: (lay.pct || []).filter(k => k !== src) });
         }
         default:
+          if (a.startsWith('g-add:')) { const n = a.slice(6); return this.setGroups(g => { g[c.key] = n; }); }
       }
+    }
+
+    openGroupMenu(start, anchor) {
+      const s = (this.view.spans || []).find(x => x.start === start);
+      if (!s || !s.label) return;
+      const items = [];
+      if (this.canEditLayout()) items.push(['hide', 'Hide group headers']);
+      if (this.authoring) items.push('-', ['rename', 'Rename group…'], ['remove', 'Remove group "' + s.label + '"']);
+      if (!items.length) items.push(['none', s.label, true]);
+      const html = '<div class="tp-menu" role="menu">' + items.map(it => it === '-' ? '<hr>' :
+        `<button type="button" role="menuitem" data-a="${it[0]}"${it[2] ? ' disabled' : ''}>${esc(it[1])}</button>`).join('') + '</div>';
+      this.openPop(anchor, html, pop => pop.addEventListener('click', e => {
+        const b = e.target.closest('button[data-a]');
+        if (!b) return;
+        this.closePop();
+        const a = b.dataset.a;
+        if (a === 'hide') return this.updateLayout({ hideGroups: true });
+        if (a === 'remove') return this.setGroups(g => { Object.keys(g).forEach(k => { if (g[k] === s.label) delete g[k]; }); });
+        if (a === 'rename') {
+          const name = window.prompt('Group name', s.label);
+          if (!name || !name.trim()) return;
+          return this.setGroups(g => { Object.keys(g).forEach(k => { if (g[k] === s.label) g[k] = name.trim(); }); });
+        }
+      }));
     }
 
     openColumnsPicker(anchor) {
@@ -1258,9 +1364,11 @@
         const c = this.colDef(k);
         const auto = this.autoHidden(c);
         return `<label${auto ? ' class="muted" title="Hidden because its parameter is set to none"' : ''}><input type="checkbox" data-k="${esc(k)}"${!hidden.has(k) ? ' checked' : ''}${auto ? ' disabled' : ''}> ${esc(this.labelFor(c))}</label>`;
-      }).join('') + '<hr><button type="button" data-a="all">Show all</button></div>';
+      }).join('') + (this.groupNames().length ? `<hr><label><input type="checkbox" data-g="1"${this.layout.hideGroups ? '' : ' checked'}> Show group headers</label>` : '') +
+        '<hr><button type="button" data-a="all">Show all</button></div>';
       this.openPop(anchor, html, pop => {
         pop.addEventListener('change', e => {
+          if (e.target.dataset.g) return this.updateLayout({ hideGroups: !e.target.checked });
           const k = e.target.dataset.k;
           if (!k) return;
           const h = new Set(this.layout.hidden || []);
@@ -1341,6 +1449,7 @@
         includeSubtotals: this.cfg.export.subtotals,
         totalsLocation: this.cfg.totals.location,
         frozenCols: nFrozen,
+        groupHeaders: this.view.spans ? this.view.spans.filter(s => s.label).map(s => ({ label: s.label, start: s.start, end: s.end })) : null,
         format: (sc, v, isTotal) => this.cellFormat(this.colDef(sc.key), v, isTotal),
         barColumns: cols.filter(c => c.isNum && this.cfg.cf[c.key] && this.cfg.cf[c.key].type === 'bars').map(c => ({ key: c.key, totals: !!this.cfg.cf[c.key].totals }))
       };

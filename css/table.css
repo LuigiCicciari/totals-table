@@ -37,7 +37,7 @@ button, input, select { font: inherit; color: inherit; }
 /* overflow-anchor: none stops the browser "correcting" scroll position while rows are swapped, which made the wheel run away. */
 .tp-scroll { position: relative; flex: 1 1 auto; overflow: auto; overflow-anchor: none; }
 .tp-grid { position: relative; min-width: 100%; }
-.tp-hrow, .tp-frow, .tp-trow, .tp-row { display: grid; grid-template-columns: var(--cols); }
+.tp-grow, .tp-hrow, .tp-frow, .tp-trow, .tp-row { display: grid; grid-template-columns: var(--cols); }
 .tp-top { position: sticky; top: 0; z-index: 3; background: #fff; }
 .tp-head { position: relative; background: var(--tp-head-bg); }
 .tp-tot-bottom { position: sticky; bottom: 0; z-index: 3; }
@@ -64,6 +64,14 @@ button, input, select { font: inherit; color: inherit; }
 .tp-fzh.at-start { right: auto; left: 0; border-right: 0; border-left: 2px dashed var(--tp-line-strong); }
 .tp-fzh:hover { border-color: var(--tp-accent); }
 .tp-guide { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--tp-accent); z-index: 5; pointer-events: none; }
+
+/* Group headers span their member columns; the label is centered over the run. */
+.tp-g { display: flex; align-items: center; justify-content: center; gap: 2px; padding-right: 2px; font-weight: 600; background: var(--tp-head-bg); user-select: none; }
+.tp-g:not(.empty) { border-bottom-color: var(--tp-line-strong); }
+.tp-g.empty { border-bottom-color: transparent; }
+.tp-g.mv { cursor: grab; }
+.tp-g .tp-gl { overflow: hidden; text-overflow: ellipsis; }
+.tp-g:hover .tp-hm { opacity: 1; }
 
 .tp-f { padding: 2px 3px; background: var(--tp-head-bg); display: flex; gap: 2px; }
 .tp-f input { min-width: 0; width: 100%; height: 20px; padding: 1px 4px; border: 1px solid var(--tp-line-strong); border-radius: 3px; background: #fff; font-size: 11px; }

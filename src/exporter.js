@@ -64,7 +64,9 @@
     const wb = new ExcelJS.Workbook();
     const top = snap.includeTotals && snap.totalsLocation === 'top';
     const bottom = snap.includeTotals && snap.totalsLocation === 'bottom';
-    const ySplit = top ? 2 : 1;
+    const groups = (snap.groupHeaders || []).filter(g => g.label);
+    const headRow = groups.length ? 2 : 1;
+    const ySplit = headRow + (top ? 1 : 0);
     const ws = wb.addWorksheet(sheetName(snap.sheetName), {
       views: [{ state: 'frozen', xSplit: Math.min(snap.frozenCols || 0, cols.length), ySplit }]
     });
@@ -119,6 +121,16 @@
     const outline = snap.includeSubtotals && snap.rows.some(r => r.type === 'group');
     if (outline) ws.properties.outlineProperties = { summaryBelow: false, summaryRight: false };
 
+    // Group headers: one merged, centered cell over each run of member columns, as on screen.
+    if (groups.length) {
+      const gr = ws.addRow(cols.map(() => null));
+      styleRow(gr, 'header');
+      for (const g of groups) {
+        gr.getCell(g.start + 1).value = cleanText(g.label);
+        if (g.end > g.start) ws.mergeCells(1, g.start + 1, 1, g.end + 1);
+        gr.getCell(g.start + 1).alignment = { horizontal: 'center' };
+      }
+    }
     styleRow(ws.addRow(cols.map(c => cleanText(c.label))), 'header');
     if (top) { const tv = totalsValues(snap.totals, 'Total'); const tr = ws.addRow(tv); styleRow(tr, 'totals'); applyFormat(tr, tv, true); }
     const firstData = ws.rowCount + 1;
@@ -154,7 +166,7 @@
     }
     // Excel's filter/sort would scramble subtotal groups, so it is only added to plain tables.
     if (!top && !outline && lastData >= firstData && cols.length) {
-      ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: lastData, column: cols.length } };
+      ws.autoFilter = { from: { row: headRow, column: 1 }, to: { row: lastData, column: cols.length } };
     }
     return wb.xlsx.writeBuffer();
   }
