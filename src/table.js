@@ -8,6 +8,7 @@
   const OVERSCAN = 12;
   const MIN_W = 48;
   const FREEZE_MAX = 0.6;
+  const MAX_LEVELS = 3;
 
   function defaults() {
     return {
@@ -208,6 +209,12 @@
 
     colDef(key) { return this.store.columns.find(c => c.key === key); }
 
+    // Sorts are a list of { key, dir }, first one wins; older layouts stored a single object.
+    sortList() { const s = this.layout.sort; return !s ? [] : Array.isArray(s) ? s : s.key ? [s] : []; }
+
+    // Subtotal levels, outermost first; older layouts stored a single column key.
+    groupKeys() { const g = this.layout.groupBy; return !g ? [] : Array.isArray(g) ? g.slice(0, MAX_LEVELS) : [g]; }
+
     // ---------- % of total columns ----------
 
     syncVirtual() {
@@ -320,10 +327,10 @@
 
       const idx = this.filterRows(cols);
       this.fillVirtual(idx);
-      this.sortRows(idx, lay.sort, cols);
+      this.sortRows(idx, this.sortList(), cols);
       const totals = this.computeTotals(cols, idx);
       this.computeCfStats(cols, idx);
-      const disp = this.groupRows(cols, idx, lay.groupBy);
+      const disp = this.groupRows(cols, idx, this.groupKeys());
       this.view = { cols, idx, disp, totals, nFrozen, spans: this.groupSpans(cols) };
     }
 
@@ -438,26 +445,23 @@
       });
     }
 
-    sortRows(idx, sort, cols) {
-      if (!sort || !sort.key) return this.defaultSort(idx, cols);
-      const c = this.colDef(sort.key);
-      if (!c) return;
-      const { arr, num } = this.sortKeyArray(c);
-      const dir = sort.dir === 'desc' ? -1 : 1;
-      if (num) {
-        idx.sort((a, b) => {
+    // Each sort breaks ties left by the one before it; empty values always go last.
+    sortRows(idx, sorts, cols) {
+      const keys = sorts.map(s => {
+        const c = this.colDef(s.key);
+        return c && Object.assign(this.sortKeyArray(c), { dir: s.dir === 'desc' ? -1 : 1 });
+      }).filter(Boolean);
+      if (!keys.length) return this.defaultSort(idx, cols);
+      idx.sort((a, b) => {
+        for (const { arr, num, dir } of keys) {
           const x = arr[a], y = arr[b];
           const xn = x == null || x !== x, yn = y == null || y !== y;
-          if (xn || yn) return xn === yn ? a - b : xn ? 1 : -1;
-          return x === y ? a - b : (x < y ? -dir : dir);
-        });
-      } else {
-        idx.sort((a, b) => {
-          const x = arr[a], y = arr[b];
-          if (x == null || y == null) return x == null && y == null ? a - b : x == null ? 1 : -1;
-          return dir * collator.compare(x, y) || a - b;
-        });
-      }
+          if (xn || yn) { if (xn !== yn) return xn ? 1 : -1; continue; }
+          const d = num ? (x < y ? -1 : x > y ? 1 : 0) : collator.compare(x, y);
+          if (d) return dir * d;
+        }
+        return a - b;
+      });
     }
 
     totalSpec(c) {
@@ -479,46 +483,67 @@
       return out;
     }
 
-    groupRows(cols, idx, groupBy) {
-      const gc = groupBy && cols.find(c => c.key === groupBy);
+    // Builds up to three nested subtotal levels. Group keys are paths, so the same station under two markets
+    // collapses separately.
+    groupRows(cols, idx, keys) {
+      const gcs = keys.map(k => cols.find(c => c.key === k)).filter(Boolean);
       this.groups = null;
-      if (!gc) return idx;
-      const fmt = this.store.fmt[gc.key];
-      const groups = new Map();
-      for (const i of idx) {
-        const k = fmt[i] == null ? '\u0000null' : fmt[i];
-        let g = groups.get(k);
-        if (!g) groups.set(k, g = { key: k, label: fmt[i] == null ? this.nullFor(gc) : fmt[i], rows: [] });
-        g.rows.push(i);
-      }
-      const list = Array.from(groups.values());
-      this.groups = list;
+      this.groupCols = gcs;
+      if (!gcs.length) return idx;
       const raw = k => this.store.raw[k];
-      for (const g of list) {
-        g.type = 'group';
-        g.totals = {};
-        for (const c of cols) if (c.isNum) g.totals[c.key] = R.computeTotal(c.total, c.key, g.rows, raw);
-      }
-      // Sorting a number column orders the groups by their subtotal as well as the rows inside them.
-      const sort = this.layout.sort;
-      const sc = sort && cols.find(c => c.key === sort.key);
+      const sorts = this.sortList();
+      const firstNum = sorts.map(s => cols.find(c => c.key === s.key)).find(c => c && c.isNum);
+      const numDir = firstNum && sorts.find(s => s.key === firstNum.key).dir === 'desc' ? -1 : 1;
       const byLabel = (a, b) => collator.compare(a.label, b.label);
-      if (sc && sc.isNum && sc.key !== gc.key && list.some(g => g.totals[sc.key] != null)) {
-        const dir = sort.dir === 'desc' ? -1 : 1;
-        list.sort((a, b) => {
-          const x = a.totals[sc.key], y = b.totals[sc.key];
-          if (x == null || y == null) return x == null && y == null ? byLabel(a, b) : x == null ? 1 : -1;
-          return x === y ? byLabel(a, b) : (x < y ? -dir : dir);
-        });
-      } else if (!sort || sort.key !== gc.key) {
-        list.sort(byLabel);
-      }
+      const build = (rows, level, prefix) => {
+        const gc = gcs[level];
+        const fmt = this.store.fmt[gc.key];
+        const map = new Map();
+        for (const i of rows) {
+          const k = fmt[i] == null ? '\u0000null' : fmt[i];
+          let g = map.get(k);
+          if (!g) map.set(k, g = { type: 'group', key: prefix + k, label: fmt[i] == null ? this.nullFor(gc) : fmt[i], rows: [], level, colKey: gc.key });
+          g.rows.push(i);
+        }
+        const list = Array.from(map.values());
+        for (const g of list) {
+          g.totals = {};
+          for (const c of cols) if (c.isNum) g.totals[c.key] = R.computeTotal(c.total, c.key, g.rows, raw);
+          if (level + 1 < gcs.length) g.children = build(g.rows, level + 1, g.key + '\u0001');
+        }
+        // A sort on this level's own column orders its groups by name. Otherwise the first number sort orders
+        // the groups at every level by their subtotal, as well as the rows inside them.
+        const own = sorts.find(s => s.key === gc.key);
+        if (own) {
+          const d = own.dir === 'desc' ? -1 : 1;
+          list.sort((a, b) => d * byLabel(a, b));
+        } else if (firstNum && list.some(g => g.totals[firstNum.key] != null)) {
+          list.sort((a, b) => {
+            const x = a.totals[firstNum.key], y = b.totals[firstNum.key];
+            if (x == null || y == null) return x == null && y == null ? byLabel(a, b) : x == null ? 1 : -1;
+            return x === y ? byLabel(a, b) : (x < y ? -numDir : numDir);
+          });
+        } else list.sort(byLabel);
+        return list;
+      };
+      this.groups = build(idx, 0, '');
       const disp = [];
-      for (const g of list) {
-        disp.push(g);
-        if (!this.collapsed.has(g.key)) for (const i of g.rows) disp.push(i);
-      }
+      const walk = list => {
+        for (const g of list) {
+          disp.push(g);
+          if (this.collapsed.has(g.key)) continue;
+          if (g.children) walk(g.children); else for (const i of g.rows) disp.push(i);
+        }
+      };
+      walk(this.groups);
       return disp;
+    }
+
+    groupsAtLevel(level) {
+      const out = [];
+      const walk = list => { for (const g of list || []) { if (g.level === level) out.push(g); else if (g.level < level) walk(g.children); } };
+      walk(this.groups);
+      return out;
     }
 
     nullFor(c) {
@@ -725,7 +750,7 @@
       const { cols, totals } = this.view;
       this.grid.style.setProperty('--cols', this.template());
       this.grid.style.width = cols.reduce((s, c) => s + c.w, 0) + 'px';
-      const sort = this.layout.sort || {};
+      const sorts = this.sortList();
       const canEdit = this.canEditLayout();
       let h = '';
       if (this.view.spans) {
@@ -742,8 +767,11 @@
       }
       h += '<div class="tp-hrow">';
       cols.forEach((c, i) => {
-        const arrow = sort.key === c.key ? (sort.dir === 'desc' ? ' ▼' : ' ▲') : '';
-        const sortTip = sort.key === c.key ? '\nSorted ' + (c.isNum ? (sort.dir === 'desc' ? 'largest to smallest' : 'smallest to largest') : (sort.dir === 'desc' ? 'Z to A' : 'A to Z')) : '';
+        const si = sorts.findIndex(s => s.key === c.key);
+        const sort = sorts[si];
+        const arrow = sort ? (sort.dir === 'desc' ? ' ▼' : ' ▲') + (sorts.length > 1 ? `<span class="tp-sn">${si + 1}</span>` : '') : '';
+        const sortTip = (sort ? '\nSorted ' + (c.isNum ? (sort.dir === 'desc' ? 'largest to smallest' : 'smallest to largest') : (sort.dir === 'desc' ? 'Z to A' : 'A to Z')) + (sorts.length > 1 ? ' (sort ' + (si + 1) + ' of ' + sorts.length + ')' : '') : '') +
+          '\nShift-click to sort by more than one column';
         const p = this.paramFor(c);
         h += `<div ${this.cellAttrs(c, 'tp-h')} data-i="${i}" title="${esc(c.label + (p ? '  (from parameter ' + p.name + ')' : '') + (c.label !== c.name ? '\nField: ' + c.name : '') + sortTip + this.cfDescribe(c))}">` +
           `<span class="tp-hl">${esc(c.label)}${arrow}</span>` +
@@ -822,9 +850,9 @@
         const d = disp[r];
         if (typeof d === 'object') {
           const open = !this.collapsed.has(d.key);
-          h += `<div class="tp-row tp-grp" data-r="${r}">`;
+          h += `<div class="tp-row tp-grp l${d.level}" data-r="${r}">`;
           cols.forEach((c, j) => {
-            if (c.key === this.layout.groupBy) h += `<div ${this.cellAttrs(c)} data-c="${j}"><span class="tp-caret">${open ? '▾' : '▸'}</span>${esc(d.label)} <span class="tp-cnt">(${d.rows.length.toLocaleString()})</span></div>`;
+            if (c.key === d.colKey) h += `<div ${this.cellAttrs(c)} data-c="${j}"><span class="tp-caret">${open ? '▾' : '▸'}</span>${esc(d.label)} <span class="tp-cnt">(${d.rows.length.toLocaleString()})</span></div>`;
             else if (c.isNum) {
               const gv = d.totals[c.key];
               const f = this.cellFormat(c, gv, true);
@@ -864,9 +892,20 @@
         const cell = e.target.closest('.tp-h');
         if (!cell) return;
         const c = this.view.cols[+cell.dataset.i];
-        const s = this.layout.sort;
-        const next = !s || s.key !== c.key ? { key: c.key, dir: c.isNum ? 'desc' : 'asc' } : s.dir === (c.isNum ? 'desc' : 'asc') ? { key: c.key, dir: c.isNum ? 'asc' : 'desc' } : null;
-        this.setSort(next);
+        const sorts = this.sortList();
+        const def = c.isNum ? 'desc' : 'asc', alt = c.isNum ? 'asc' : 'desc';
+        // Shift-click adds the column as the next sort, flips it, then takes it out again.
+        if (e.shiftKey && sorts.length) {
+          const next = sorts.slice();
+          const i = next.findIndex(s => s.key === c.key);
+          if (i < 0) next.push({ key: c.key, dir: def });
+          else if (next[i].dir === def) next[i] = { key: c.key, dir: alt };
+          else next.splice(i, 1);
+          return this.setSort(next.length ? next : null);
+        }
+        const s = sorts.length === 1 ? sorts[0] : null;
+        const next = !s || s.key !== c.key ? { key: c.key, dir: def } : s.dir === def ? { key: c.key, dir: alt } : null;
+        this.setSort(next ? [next] : null);
       });
       this.head.addEventListener('input', e => {
         const inp = e.target.closest('input[data-i]');
@@ -1279,19 +1318,27 @@
       const edit = this.canEditLayout();
       const last = this.view.cols.length - 1;
       const words = c.isNum ? ['smallest to largest', 'largest to smallest'] : (c.isDate || this.store.dates[c.key]) ? ['oldest to newest', 'newest to oldest'] : ['A to Z', 'Z to A'];
+      const sorts = this.sortList();
+      const inSort = sorts.some(s => s.key === c.key);
+      const others = sorts.some(s => s.key !== c.key);
       const items = [
         ['sort-asc', 'Sort ' + words[0]], ['sort-desc', 'Sort ' + words[1]],
-        lay.sort && lay.sort.key === c.key ? ['sort-clear', 'Clear sort'] : null
+        others ? ['then-asc', 'Then sort ' + words[0]] : null, others ? ['then-desc', 'Then sort ' + words[1]] : null,
+        inSort && sorts.length > 1 ? ['sort-remove', 'Remove from sort'] : null,
+        sorts.length ? ['sort-clear', sorts.length > 1 ? 'Clear all sorting' : 'Clear sort'] : null
       ];
+      const gk = this.groupKeys();
+      const gl = gk.indexOf(c.key);
       if (edit) {
         items.push('-',
           i > 0 ? ['first', 'Move to first'] : null, i > 0 ? ['left', 'Move left'] : null,
           i < last ? ['right', 'Move right'] : null, i < last ? ['last', 'Move to last'] : null,
           ['hide', 'Hide column'], '-',
           ['freeze', 'Freeze up to here'], this.view.nFrozen ? ['unfreeze', 'Unfreeze columns'] : null,
-          !c.isNum ? (lay.groupBy === c.key ? ['ungroup', 'Remove subtotals'] : ['group', 'Subtotal by this column']) : null,
-          lay.groupBy === c.key ? ['collapse-all', 'Collapse all'] : null,
-          lay.groupBy === c.key ? ['expand-all', 'Expand all'] : null, '-',
+          !c.isNum && gl < 0 && gk.length < MAX_LEVELS ? ['group', gk.length ? 'Add subtotal level ' + (gk.length + 1) : 'Subtotal by this column'] : null,
+          gl >= 0 ? ['ungroup', gk.length > 1 ? 'Remove subtotal level ' + (gl + 1) : 'Remove subtotals'] : null,
+          gl >= 0 ? ['collapse-all', 'Collapse all'] : null,
+          gl >= 0 ? ['expand-all', 'Expand all'] : null, '-',
           ['rename', 'Rename…'], lay.labels && lay.labels[c.key] ? ['unrename', 'Reset name'] : null);
         // Shares only make sense for columns that add up, so ratio columns don't offer it.
         // Viewers can hide formatting they find distracting; it's saved with their layout.
@@ -1324,8 +1371,17 @@
       const cols = this.view.cols;
       const lay = this.layout;
       switch (a) {
-        case 'sort-asc': return this.setSort({ key: c.key, dir: 'asc' });
-        case 'sort-desc': return this.setSort({ key: c.key, dir: 'desc' });
+        case 'sort-asc': return this.setSort([{ key: c.key, dir: 'asc' }]);
+        case 'sort-desc': return this.setSort([{ key: c.key, dir: 'desc' }]);
+        case 'then-asc':
+        case 'then-desc': {
+          const dir = a === 'then-asc' ? 'asc' : 'desc';
+          const next = this.sortList().slice();
+          const k = next.findIndex(s => s.key === c.key);
+          if (k >= 0) next[k] = { key: c.key, dir }; else next.push({ key: c.key, dir });
+          return this.setSort(next);
+        }
+        case 'sort-remove': return this.setSort(this.sortList().filter(s => s.key !== c.key));
         case 'sort-clear': return this.setSort(null);
         case 'first': return this.moveColumn(i, 0);
         case 'left': return this.moveColumn(i, i - 1);
@@ -1334,14 +1390,23 @@
         case 'hide': return this.updateLayout({ hidden: (lay.hidden || []).concat(c.key) });
         case 'freeze': return this.updateLayout({ freeze: i + 1 });
         case 'unfreeze': return this.updateLayout({ freeze: 0 });
-        case 'group': return this.updateLayout({ groupBy: c.key });
-        case 'ungroup': return this.updateLayout({ groupBy: null });
+        case 'group': return this.updateLayout({ groupBy: this.groupKeys().concat(c.key).slice(0, MAX_LEVELS) });
+        case 'ungroup': { const g = this.groupKeys().filter(k => k !== c.key); return this.updateLayout({ groupBy: g.length ? g : null }); }
+        // Collapse all on a level shows that level's subtotals (opening the levels above it);
+        // Expand all opens that level and everything above it.
         case 'collapse-all':
-        case 'expand-all':
-          this.collapsed = a === 'collapse-all' ? new Set((this.groups || []).map(g => g.key)) : new Set();
+        case 'expand-all': {
+          const level = (this.groupCols || []).findIndex(g => g.key === c.key);
+          if (level < 0) return;
+          for (let l = 0; l <= level; l++) {
+            for (const g of this.groupsAtLevel(l)) {
+              if (a === 'collapse-all' && l === level) this.collapsed.add(g.key); else this.collapsed.delete(g.key);
+            }
+          }
           this.computeView();
           this.renderBody(true);
           return;
+        }
         case 'rename': {
           const name = window.prompt('Column name', c.label);
           if (name == null) return;
@@ -1483,16 +1548,21 @@
         if (url && (f != null || lk.label)) return { kind: 'link', v: lk.label || f, url, csv: f };
         return f == null ? { kind: 'null' } : { kind: 'text', v: f };
       };
-      const groupKey = this.layout.groupBy;
-      // Every row is exported whatever is collapsed on screen; collapsed groups carry a flag for Excel's outline.
+      // Every row is exported whatever is collapsed on screen; outline levels and hidden flags let Excel
+      // start with the same groups collapsed.
       let rows;
       if (this.groups) {
         rows = [];
-        for (const g of this.groups) {
-          const collapsed = this.collapsed.has(g.key);
-          rows.push({ type: 'group', label: g.label + ' subtotal', totals: Object.assign({ __label: groupKey }, g.totals), collapsed });
-          for (const i of g.rows) rows.push({ type: 'data', i, level: 1, hidden: collapsed });
-        }
+        const walk = (list, hiddenAbove) => {
+          for (const g of list) {
+            const collapsed = this.collapsed.has(g.key);
+            rows.push({ type: 'group', label: g.label + ' subtotal', totals: Object.assign({ __label: g.colKey }, g.totals), collapsed, level: g.level, hidden: hiddenAbove });
+            const hid = hiddenAbove || collapsed;
+            if (g.children) walk(g.children, hid);
+            else for (const i of g.rows) rows.push({ type: 'data', i, level: g.level + 1, hidden: hid });
+          }
+        };
+        walk(this.groups, false);
       } else {
         rows = this.view.idx.map(i => ({ type: 'data', i }));
       }

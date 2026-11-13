@@ -83,7 +83,7 @@
       }
     };
     const totalsValues = (tot, labelText) => cols.map(c => {
-      if (c.key === snap.totalsLabelKey) return labelText;
+      if (c.key === (tot.__label || snap.totalsLabelKey)) return labelText;
       const v = tot[c.key];
       return v == null || !isFinite(v) ? null : v;
     });
@@ -141,6 +141,8 @@
         const gr = ws.addRow(gv);
         styleRow(gr, 'group');
         applyFormat(gr, gv, true);
+        if (r.level) gr.outlineLevel = r.level;
+        if (r.hidden) gr.hidden = true;
       } else {
         const vals = cols.map(c => xlCell(snap.value(c, r.i), c));
         const row = ws.addRow(vals);

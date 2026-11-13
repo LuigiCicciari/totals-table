@@ -6,10 +6,10 @@ A fast table for Tableau worksheets, with correct totals for ratio columns, head
 
 **Table**
 - Columns: drag to reorder, move first/left/right/last, hide, show/hide picker, resize, rename/reset name
-- Rows load A to Z by the text columns on the left, like a crosstab. Click a header to sort (text A to Z first, numbers largest first); viewers can always sort
+- Rows load A to Z by the text columns on the left, like a crosstab. Click a header to sort (text A to Z first, numbers largest first). Shift-click more headers, or use Then sort in a column's menu, to sort by several columns; headers show the sort order as small numbers. Viewers can always sort
 - Optional filter row under the headers (text: contains, starts with or exact; numbers: min/max) and optional search box, both turned on in Format → Display
 - Frozen header and totals row. Parameter-driven columns are frozen by default; drag the freeze line or use "Freeze up to here"
-- Optional subtotals by any text column. Click a group row to collapse it, or use Collapse all / Expand all in that column's menu. Sorting a number column orders the groups by their subtotal and the rows within each group; sorting the subtotalled column orders the groups by name
+- Optional subtotals by any text column, up to three levels deep (for example Region, then State, then City): use Subtotal by this column, then Add subtotal level on the next column. Every level uses the totals rules, so ratio subtotals stay correct. Click a group row to collapse it. Collapse all in a level's column menu shows that level's subtotals, and Expand all opens it again. Sorting a number column orders the groups at every level by their subtotal and the rows within each group; sorting a subtotalled column orders that level by name
 - Links: columns holding web addresses are clickable automatically and open in a new tab. This includes parameter-driven columns: when a parameter switches a column to a web-address field, it becomes clickable, and switches back to plain text afterwards. In Format → Columns & totals, a link column can show a fixed label (such as "View") instead of the address, or any text column can link to a web-address column, so a name opens its page while the address column stays hidden. Only http and https addresses become links
 - Group headers: a shared label over related columns, such as "Sales" over Sales, Profit and Profit Ratio, and "Orders" over Quantity and Discount. Set them in Format → Columns & totals, or with New group / Add to group in a column's menu. Drag a group header to move the whole group; it drops only between groups, never inside one, and the table scrolls when you drag near its edge. The group's menu also has Move group left, right, to start and to end. Membership is fixed by the author, so a column moved out of its group keeps its label above it in the new spot. Viewers can turn group headers off from the group's menu or the show/hide columns picker. Excel gets merged group header cells
 - % of total: any column that sums can get a companion "% of total" column from its menu. Shares are of the filtered total, and subtotal rows show each group's share
@@ -43,7 +43,7 @@ A fast table for Tableau worksheets, with correct totals for ratio columns, head
 - Links come out as clickable hyperlinks in Excel and as plain text or addresses in CSV
 - Excel: plain values, never formulas; Tableau's number formats carried over ($, %, thousands, decimals, K/M/B); real dates, including text columns that hold ISO dates (such as `STR([Date])`); bold header and totals; frozen header and frozen columns
 - CSV: raw data only. Every row, never totals or subtotals. UTF-8, numbers rounded to what the table shows, dates as `yyyy-mm-dd`
-- Collapsed subtotal groups never hide rows from a download. In Excel, subtotal rows sit above their rows, grouped with Excel's +/- outline, and groups collapsed in the table start collapsed in the file
+- Collapsed subtotal groups never hide rows from a download. In Excel, subtotal rows sit above their rows, grouped with Excel's +/- outline (one outline level per subtotal level, so Excel's 1 2 3 buttons collapse to each level), and groups collapsed in the table start collapsed in the file
 - File name template with `{sheet}`, `{date}`, `{time}` and `{param:Parameter Name}`
 
 **Viewer layouts**

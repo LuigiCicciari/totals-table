@@ -81,6 +81,10 @@ button, input, select { font: inherit; color: inherit; }
 .tp-c.warn { color: var(--tp-warn); }
 .tp-grp { background: #f3f5f8; font-weight: 600; cursor: pointer; }
 .tp-grp:hover { background: #e9edf3; }
+.tp-grp.l1 { background: #f7f8fa; }
+.tp-grp.l2 { background: #fafbfc; font-weight: 500; }
+.tp-grp.l1:hover, .tp-grp.l2:hover { background: #eef1f5; }
+.tp-sn { font-size: 9px; vertical-align: super; margin-left: 1px; }
 .tp-caret { display: inline-block; width: 14px; color: var(--tp-muted); }
 .tp-cnt { color: var(--tp-muted); font-weight: 400; }
 
