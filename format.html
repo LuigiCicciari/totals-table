@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <title>Format Table</title>
-  <link rel="stylesheet" href="css/format.css?v=202611130834">
+  <link rel="stylesheet" href="css/format.css?v=202611130917">
 </head>
 <body>
   <header>
@@ -13,6 +13,7 @@
     <nav role="tablist">
       <button role="tab" data-tab="display" aria-selected="true">Display</button>
       <button role="tab" data-tab="columns" aria-selected="false">Columns &amp; totals</button>
+      <button role="tab" data-tab="formatting" aria-selected="false">Formatting</button>
       <button role="tab" data-tab="rules" aria-selected="false">Totals rules</button>
       <button role="tab" data-tab="download" aria-selected="false">Download</button>
     </nav>
@@ -54,6 +55,17 @@
       <table class="cols">
         <thead><tr><th>Field</th><th>Header</th><th>Header from parameter</th><th>Total</th><th>Link</th><th>Hidden</th></tr></thead>
         <tbody id="colRows"></tbody>
+      </table>
+    </section>
+
+    <section id="tab-formatting" role="tabpanel" hidden>
+      <p class="muted small">Color number columns by thresholds, a color scale, or data bars. Colors are colorblind-safe, and thresholds also show a symbol, so the meaning never depends on color alone.</p>
+      <div class="legend" aria-hidden="true">
+        <span class="sw sw-good">✓ On target</span><span class="sw sw-warn">! Watch</span><span class="sw sw-bad">✕ Below target</span>
+      </div>
+      <table class="cols cf">
+        <thead><tr><th>Column</th><th>Style</th><th>Settings</th></tr></thead>
+        <tbody id="cfRows"></tbody>
       </table>
     </section>
 
@@ -104,9 +116,9 @@
 
   <script src="lib/tableau.extensions.1.latest.min.js"></script>
   <script>if (/[?&]mock\b/.test(location.search)) document.write('<script src="test/mock-viz.js"><\/script>');</script>
-  <script src="src/rules.js?v=202611130834"></script>
-  <script src="src/exporter.js?v=202611130834"></script>
-  <script src="src/table.js?v=202611130834"></script>
-  <script src="src/format.js?v=202611130834"></script>
+  <script src="src/rules.js?v=202611130917"></script>
+  <script src="src/exporter.js?v=202611130917"></script>
+  <script src="src/table.js?v=202611130917"></script>
+  <script src="src/format.js?v=202611130917"></script>
 </body>
 </html>

@@ -22,6 +22,14 @@ A fast table for Tableau worksheets, with correct totals for ratio columns, head
 - Totals and subtotals follow the table's own filters
 - Totals come from rules imported into each workbook (see below), then per-column overrides: Auto, Sum, Average, Min, Max, Ratio (A ÷ B × multiplier) or None
 
+**Conditional formatting** (Format → Formatting)
+- Thresholds: good / watch / bad bands for any number column, with "higher is better" or "lower is better". Cut-off values can be fixed or come from a parameter, so a goal set on the dashboard recolors the table live
+- Color scales: a gradient across the 5th to 95th percentile of what's on screen, good-to-bad or a single color
+- Data bars: a bar behind each number, sized to the largest value on screen
+- Accessible by design: the colors are colorblind-safe (checked under protan, deutan and tritan simulation), text contrast stays above 5:1, and thresholds also show ✓ ! ✕ symbols plus screen-reader text, so meaning never depends on color alone
+- Totals and subtotals stay plain unless turned on per column. Formatting recalculates with filters
+- Excel keeps the colors and symbols (the cells stay real numbers), and data bars become Excel's own data bars
+
 **Headers from parameters**
 - If a field and a parameter share a name (for example a calculated field "Column 1" driven by a parameter "Column 1"), the header shows the parameter's current value and updates live
 - A column whose parameter is set to "(none)" is hidden automatically

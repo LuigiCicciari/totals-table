@@ -26,6 +26,7 @@
       rules: null,
       export: { formats: 'excel', excelTotals: true, subtotals: true, filename: '{sheet} {date}' },
       links: {},
+      cf: {},
       layout: { order: [], hidden: [], widths: {}, labels: {}, freeze: 'auto', sort: null, groupBy: null, pct: [] }
     };
   }
@@ -41,11 +42,29 @@
     out.headerLinks = saved.headerLinks || {};
     out.totalOverrides = saved.totalOverrides || {};
     out.links = saved.links || {};
+    out.cf = saved.cf || {};
     return out;
   }
 
   const esc = s => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
   const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
+  // Colorblind-safe good/warning/bad colors. Every pair stays distinct under protan, deutan and tritan simulation,
+  // dark text on each tint is above 9:1 contrast, and each text color is above 5:1 on white.
+  const CF = {
+    bg: { bad: '#F6CDB6', warn: '#FBE7A8', good: '#BFE6D8' },
+    text: { bad: '#9E2A2B', warn: '#8A6100', good: '#00704F' },
+    sym: { bad: '✕', warn: '!', good: '✓' },
+    word: { bad: 'Below target', warn: 'Watch', good: 'On target' },
+    bar: '#A9CDEB'
+  };
+
+  function mix(a, b, t) {
+    const p = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+    const x = p(a), y = p(b);
+    t = Math.max(0, Math.min(1, t));
+    return '#' + x.map((v, i) => Math.round(v + (y[i] - v) * t).toString(16).padStart(2, '0')).join('');
+  }
 
   class TableApp {
     constructor(rootEl) {
@@ -98,7 +117,7 @@
       try {
         const ps = await this.ws.getParametersAsync();
         this.paramObjs = ps;
-        this.params = ps.map(p => ({ name: p.name, value: p.currentValue ? String(p.currentValue.formattedValue) : '' }));
+        this.params = ps.map(p => ({ name: p.name, value: p.currentValue ? String(p.currentValue.formattedValue) : '', raw: p.currentValue ? p.currentValue.value : null }));
         ps.forEach(p => p.addEventListener(tableau.TableauEventType.ParameterChanged, () => this.onParamChanged()));
       } catch (e) {
         this.params = [];
@@ -108,7 +127,7 @@
     async onParamChanged() {
       try {
         const ps = await this.ws.getParametersAsync();
-        this.params = ps.map(p => ({ name: p.name, value: p.currentValue ? String(p.currentValue.formattedValue) : '' }));
+        this.params = ps.map(p => ({ name: p.name, value: p.currentValue ? String(p.currentValue.formattedValue) : '', raw: p.currentValue ? p.currentValue.value : null }));
       } catch (e) { /* keep previous values */ }
       this.refresh();
     }
@@ -301,6 +320,7 @@
       this.fillVirtual(idx);
       this.sortRows(idx, lay.sort, cols);
       const totals = this.computeTotals(cols, idx);
+      this.computeCfStats(cols, idx);
       const disp = this.groupRows(cols, idx, lay.groupBy);
       this.view = { cols, idx, disp, totals, nFrozen };
     }
@@ -551,15 +571,113 @@
 
     template() { return this.view.cols.map(c => c.w + 'px').join(' '); }
 
-    cellAttrs(c, extra) {
+    cellAttrs(c, extra, extraStyle) {
       let cls = 'tp-c' + (c.isNum ? ' num' : '') + (extra ? ' ' + extra : '');
-      let style = '';
+      let style = extraStyle || '';
       if (c.frozen) {
         cls += ' fz';
-        style = ` style="left:${c.left}px"`;
+        style = 'left:' + c.left + 'px;' + style;
         if (c === this.view.cols[this.view.nFrozen - 1]) cls += ' fz-edge';
       }
-      return `class="${cls}"${style}`;
+      return `class="${cls}"` + (style ? ` style="${style}"` : '');
+    }
+
+    // ---------- conditional formatting ----------
+
+    paramNumber(name) {
+      const p = this.params.find(x => x.name.toLowerCase() === String(name).toLowerCase());
+      if (!p) return null;
+      const parsed = R.parseFormatted(p.value);
+      if (parsed) return parsed.spec.pct ? parsed.value * 100 : parsed.value;
+      const n = Number(p.raw);
+      return isFinite(n) ? n : null;
+    }
+
+    cutValue(def) {
+      if (!def) return null;
+      if (def.param) return this.paramNumber(def.param);
+      if (def.value === '' || def.value == null) return null;
+      const n = Number(def.value);
+      return isFinite(n) ? n : null;
+    }
+
+    // Thresholds compare in the units shown on screen, so 5 means 5% on a percent column.
+    cfLevel(rule, c, v) {
+      const x = v * (c.spec && c.spec.pct ? 100 : 1);
+      const lo = this.cutValue(rule.low), hi = this.cutValue(rule.high);
+      if (rule.better === 'lower') {
+        if (lo != null && x <= lo) return 'good';
+        if (hi != null && x > hi) return 'bad';
+      } else {
+        if (lo != null && x < lo) return 'bad';
+        if (hi != null && x >= hi) return 'good';
+      }
+      return lo != null && hi != null ? 'warn' : null;
+    }
+
+    computeCfStats(cols, idx) {
+      this.cfStats = {};
+      for (const c of cols) {
+        const rule = c.isNum && this.cfg.cf[c.key];
+        if (!rule || (rule.type !== 'scale' && rule.type !== 'bars')) continue;
+        const raw = this.store.raw[c.key];
+        const vals = [];
+        for (const i of idx) { const v = raw[i]; if (v === v) vals.push(v); }
+        if (!vals.length) continue;
+        vals.sort((x, y) => x - y);
+        const min = vals[0], max = vals[vals.length - 1];
+        // Color scales span the 5th to 95th percentile, so a few extreme rows don't wash out everything else.
+        const p = q => vals[Math.min(vals.length - 1, Math.max(0, Math.round(q * (vals.length - 1))))];
+        this.cfStats[c.key] = { min, max, lo: p(0.05), hi: p(0.95), maxAbs: Math.max(Math.abs(min), Math.abs(max)) };
+      }
+    }
+
+    // Returns { style, cls, sym, word } for one numeric cell, or null when no formatting applies.
+    cellFormat(c, v, isTotal) {
+      const rule = this.cfg.cf[c.key];
+      if (!rule || !rule.type || v == null || v !== v) return null;
+      if (isTotal && !rule.totals) return null;
+      if (rule.type === 'threshold') {
+        const lvl = this.cfLevel(rule, c, v);
+        if (!lvl) return null;
+        const style = rule.target === 'text' ? 'color:' + CF.text[lvl] + ';' : 'background-color:' + CF.bg[lvl] + ';';
+        return { style, cls: 'cf', sym: rule.symbols !== false ? CF.sym[lvl] : '', word: CF.word[lvl], level: lvl, fill: rule.target === 'text' ? null : CF.bg[lvl], font: rule.target === 'text' ? CF.text[lvl] : null };
+      }
+      const st = this.cfStats[c.key];
+      if (!st) return null;
+      if (rule.type === 'scale') {
+        const t = st.hi === st.lo ? 0.5 : Math.max(0, Math.min(1, (v - st.lo) / (st.hi - st.lo)));
+        let color;
+        if (rule.better === 'none') color = mix('#FFFFFF', CF.bar, t);
+        else {
+          const u = rule.better === 'lower' ? 1 - t : t;
+          color = u < 0.5 ? mix(CF.bg.bad, '#FFFFFF', u * 2) : mix('#FFFFFF', CF.bg.good, (u - 0.5) * 2);
+        }
+        return { style: 'background-color:' + color + ';', cls: 'cf', fill: color };
+      }
+      if (rule.type === 'bars') {
+        const pct = st.maxAbs ? Math.min(100, Math.abs(v) / st.maxAbs * 100) : 0;
+        const col = v < 0 ? CF.bg.bad : CF.bar;
+        return { style: `background-image:linear-gradient(to right,${col} ${pct.toFixed(1)}%,transparent ${pct.toFixed(1)}%);`, cls: 'cf', bar: pct };
+      }
+      return null;
+    }
+
+    cfInner(f, text) {
+      if (!f || !f.word) return text;
+      return (f.sym ? `<span class="tp-sym tp-sym-${f.level}" aria-hidden="true">${f.sym}</span>` : '') + `<span class="tp-sr">${f.word}: </span>` + text;
+    }
+
+    cfDescribe(c) {
+      const r = this.cfg.cf[c.key];
+      if (!r || !r.type) return '';
+      if (r.type === 'bars') return '\nFormatting: data bars';
+      if (r.type === 'scale') return '\nFormatting: color scale' + (r.better === 'none' ? '' : r.better === 'lower' ? ', lower is better' : ', higher is better');
+      const name = d => d && d.param ? d.param : d && d.value !== '' && d.value != null ? d.value : null;
+      const lo = name(r.low), hi = name(r.high);
+      return '\nFormatting: ' + (r.better === 'lower'
+        ? [lo != null ? '✓ at or below ' + lo : '', hi != null ? '✕ above ' + hi : ''].filter(Boolean).join(', ')
+        : [lo != null ? '✕ below ' + lo : '', hi != null ? '✓ at or above ' + hi : ''].filter(Boolean).join(', ')) + (lo != null && hi != null ? ', ! in between' : '');
     }
 
     renderHead() {
@@ -573,7 +691,7 @@
         const arrow = sort.key === c.key ? (sort.dir === 'desc' ? ' ▼' : ' ▲') : '';
         const sortTip = sort.key === c.key ? '\nSorted ' + (c.isNum ? (sort.dir === 'desc' ? 'largest to smallest' : 'smallest to largest') : (sort.dir === 'desc' ? 'Z to A' : 'A to Z')) : '';
         const p = this.paramFor(c);
-        h += `<div ${this.cellAttrs(c, 'tp-h')} data-i="${i}" title="${esc(c.label + (p ? '  (from parameter ' + p.name + ')' : '') + (c.label !== c.name ? '\nField: ' + c.name : '') + sortTip)}">` +
+        h += `<div ${this.cellAttrs(c, 'tp-h')} data-i="${i}" title="${esc(c.label + (p ? '  (from parameter ' + p.name + ')' : '') + (c.label !== c.name ? '\nField: ' + c.name : '') + sortTip + this.cfDescribe(c))}">` +
           `<span class="tp-hl">${esc(c.label)}${arrow}</span>` +
           `<button class="tp-hm" type="button" data-i="${i}" aria-label="Column menu for ${esc(c.label)}">▾</button>` +
           (canEdit ? `<span class="tp-rz" data-i="${i}"></span>` : '') + '</div>';
@@ -618,7 +736,8 @@
           const v = tot[c.key];
           const text = loading ? '…' : v == null ? '' : R.formatNumber(v, c.spec);
           const title = (c.total ? c.total.text : '') + (c.total && c.total.problem ? ' — ' + c.total.problem : '') + (c.total && c.total.source === 'override' ? ' (set for this column)' : c.total && c.total.source === 'rule' ? ' (' + c.total.label + ')' : '');
-          h += `<div ${this.cellAttrs(c, c.total && c.total.problem ? 'warn' : '')} title="${esc(title)}">${esc(text)}</div>`;
+          const f = loading ? null : this.cellFormat(c, v, true);
+          h += `<div ${this.cellAttrs(c, (c.total && c.total.problem ? 'warn' : '') + (f ? ' cf' : ''), f && f.style)} title="${esc(title)}">${this.cfInner(f, esc(text))}</div>`;
         } else {
           h += `<div ${this.cellAttrs(c)}></div>`;
         }
@@ -642,6 +761,7 @@
       const nulls = cols.map(c => esc(this.nullFor(c)));
       const fmts = cols.map(c => st.fmt[c.key]);
       const links = cols.map(c => { const l = this.linkFor(c); return l ? { urls: st.fmt[l.urlKey], label: l.label } : null; });
+      const cfCols = cols.map(c => !!(c.isNum && this.cfg.cf[c.key] && this.cfg.cf[c.key].type));
       const rg = this.normRange();
       let h = '';
       for (let r = start; r < end; r++) {
@@ -651,7 +771,11 @@
           h += `<div class="tp-row tp-grp" data-r="${r}">`;
           cols.forEach((c, j) => {
             if (c.key === this.layout.groupBy) h += `<div ${this.cellAttrs(c)} data-c="${j}"><span class="tp-caret">${open ? '▾' : '▸'}</span>${esc(d.label)} <span class="tp-cnt">(${d.rows.length.toLocaleString()})</span></div>`;
-            else if (c.isNum) h += `<div ${this.cellAttrs(c)} data-c="${j}">${esc(d.totals[c.key] == null ? '' : R.formatNumber(d.totals[c.key], c.spec))}</div>`;
+            else if (c.isNum) {
+              const gv = d.totals[c.key];
+              const f = this.cellFormat(c, gv, true);
+              h += `<div ${this.cellAttrs(c, f ? 'cf' : '', f && f.style)} data-c="${j}">${this.cfInner(f, esc(gv == null ? '' : R.formatNumber(gv, c.spec)))}</div>`;
+            }
             else h += `<div ${this.cellAttrs(c)} data-c="${j}"></div>`;
           });
           h += '</div>';
@@ -662,11 +786,12 @@
         for (let j = 0; j < cols.length; j++) {
           const v = fmts[j][d];
           const inRange = rg && r >= rg.r0 && r <= rg.r1 && j >= rg.c0 && j <= rg.c1;
-          let inner = v == null ? nulls[j] : esc(v);
+          const f = cfCols[j] ? this.cellFormat(cols[j], st.raw[cols[j].key][d], false) : null;
+          let inner = v == null ? nulls[j] : this.cfInner(f, esc(v));
           const lk = links[j];
           const url = lk && this.safeUrl(lk.urls[d]);
           if (url && (v != null || lk.label)) inner = `<a class="tp-link" href="${esc(url)}" target="_blank" rel="noopener noreferrer" title="${esc(url)}">${esc(lk.label || v)}</a>`;
-          h += `<div ${this.cellAttrs(cols[j], (v == null ? 'nul' : '') + (inRange ? ' rg' : ''))} data-c="${j}">${inner}</div>`;
+          h += `<div ${this.cellAttrs(cols[j], (v == null ? 'nul' : '') + (inRange ? ' rg' : '') + (f ? ' cf' : ''), f && f.style)} data-c="${j}">${inner}</div>`;
         }
         h += '</div>';
       }
@@ -1206,7 +1331,9 @@
         includeTotals: includeTotals && this.cfg.totals.show,
         includeSubtotals: this.cfg.export.subtotals,
         totalsLocation: this.cfg.totals.location,
-        frozenCols: nFrozen
+        frozenCols: nFrozen,
+        format: (sc, v, isTotal) => this.cellFormat(this.colDef(sc.key), v, isTotal),
+        barColumns: cols.filter(c => c.isNum && this.cfg.cf[c.key] && this.cfg.cf[c.key].type === 'bars').map(c => ({ key: c.key, totals: !!this.cfg.cf[c.key].totals }))
       };
     }
 

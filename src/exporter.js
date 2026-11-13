@@ -95,21 +95,45 @@
       }
     };
 
+    // Conditional formatting: fills and font colors are copied as static colors; symbols go into the number
+    // format, so the cell is still a real number that sums and sorts in Excel.
+    const argb = hex => 'FF' + hex.replace('#', '').toUpperCase();
+    const withSymbol = (fmt, sym) => (fmt || 'General').split(';')
+      .map(sec => sec.startsWith('"') ? '"' + sym + ' ' + sec.slice(1) : '"' + sym + ' "' + sec).join(';');
+    const applyFormat = (row, values, isTotal) => {
+      if (!snap.format) return;
+      cols.forEach((c, k) => {
+        if (!c.isNum) return;
+        const v = values[k];
+        if (typeof v !== 'number') return;
+        const f = snap.format(c, v, isTotal);
+        if (!f) return;
+        const cell = row.getCell(k + 1);
+        if (f.fill) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: argb(f.fill) } };
+        if (f.font) cell.font = Object.assign({}, cell.font, { color: { argb: argb(f.font) } });
+        if (f.sym) cell.numFmt = withSymbol(c.excelFmt, f.sym);
+      });
+    };
+
     // Subtotal rows sit above their detail rows, which are grouped with Excel's outline (+/- in the margin).
     const outline = snap.includeSubtotals && snap.rows.some(r => r.type === 'group');
     if (outline) ws.properties.outlineProperties = { summaryBelow: false, summaryRight: false };
 
     styleRow(ws.addRow(cols.map(c => cleanText(c.label))), 'header');
-    if (top) styleRow(ws.addRow(totalsValues(snap.totals, 'Total')), 'totals');
+    if (top) { const tv = totalsValues(snap.totals, 'Total'); const tr = ws.addRow(tv); styleRow(tr, 'totals'); applyFormat(tr, tv, true); }
     const firstData = ws.rowCount + 1;
     for (const r of snap.rows) {
       if (r.type === 'group') {
         if (!outline) continue;
-        styleRow(ws.addRow(totalsValues(r.totals, r.label)), 'group');
+        const gv = totalsValues(r.totals, r.label);
+        const gr = ws.addRow(gv);
+        styleRow(gr, 'group');
+        applyFormat(gr, gv, true);
       } else {
         const vals = cols.map(c => xlCell(snap.value(c, r.i), c));
         const row = ws.addRow(vals);
         vals.forEach((v, k) => { if (v && v.hyperlink) row.getCell(k + 1).font = { color: { argb: 'FF0563C1' }, underline: true }; });
+        applyFormat(row, vals, false);
         if (outline && r.level) {
           row.outlineLevel = r.level;
           if (r.hidden) row.hidden = true;
@@ -117,7 +141,17 @@
       }
     }
     const lastData = ws.rowCount;
-    if (bottom) styleRow(ws.addRow(totalsValues(snap.totals, 'Total')), 'totals');
+    if (bottom) { const tv = totalsValues(snap.totals, 'Total'); const tr = ws.addRow(tv); styleRow(tr, 'totals'); applyFormat(tr, tv, true); }
+    // Data bars use Excel's own data bars over the data rows, so they stay live if values change in Excel.
+    for (const b of snap.barColumns || []) {
+      const k = cols.findIndex(c => c.key === b.key);
+      if (k < 0 || lastData < firstData || outline) continue;
+      const letter = ws.getColumn(k + 1).letter;
+      ws.addConditionalFormatting({
+        ref: letter + firstData + ':' + letter + lastData,
+        rules: [{ type: 'dataBar', gradient: false, cfvo: [{ type: 'min' }, { type: 'max' }], color: { argb: 'FFA9CDEB' } }]
+      });
+    }
     // Excel's filter/sort would scramble subtotal groups, so it is only added to plain tables.
     if (!top && !outline && lastData >= firstData && cols.length) {
       ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: lastData, column: cols.length } };

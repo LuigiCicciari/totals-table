@@ -50,3 +50,9 @@ table.cols td .resolves { margin-top: 4px; max-width: 230px; }
 .linktext { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; font-size: 12px; color: #59636e; }
 .linktext input[type="text"] { width: 170px !important; color: #1f2328; }
 .hint { font-size: 11px; color: #59636e; margin-top: 2px; }
+.legend { display: flex; gap: 8px; margin: 4px 0 10px; flex-wrap: wrap; }
+.sw { padding: 2px 8px; border-radius: 4px; font-size: 12px; color: #1f2328; }
+.sw-good { background: #BFE6D8; } .sw-warn { background: #FBE7A8; } .sw-bad { background: #F6CDB6; }
+.cfset { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
+.cfset label { display: flex; gap: 4px; align-items: center; font-size: 12px; }
+.cfset input[type="number"] { width: 80px; padding: 3px 5px; border: 1px solid #c9ced4; border-radius: 4px; }

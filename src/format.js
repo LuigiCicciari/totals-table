@@ -13,6 +13,7 @@
     document.querySelectorAll('[role="tabpanel"]').forEach(p => { p.hidden = p.id !== 'tab-' + name; });
     if (name === 'columns') renderColumns();
     if (name === 'rules') renderRules();
+    if (name === 'formatting') renderFormatting();
   }
 
   // ---------- display + download ----------
@@ -163,6 +164,81 @@
     else $('res-' + el.dataset.i).innerHTML = resolvesHtml(c);
   }
 
+  // ---------- conditional formatting ----------
+
+  function cutInputs(i, which, def) {
+    def = def || {};
+    return `<input type="number" step="any" data-i="${i}" data-k="${which}Value" value="${esc(def.param ? '' : (def.value != null ? def.value : ''))}" aria-label="${which === 'low' ? 'Lower' : 'Upper'} threshold value"${def.param ? ' disabled' : ''}>` +
+      (params.length ? ` or <select data-i="${i}" data-k="${which}Param" aria-label="${which === 'low' ? 'Lower' : 'Upper'} threshold parameter"><option value="">fixed value</option>${params.map(p => `<option value="${esc(p)}"${def.param === p ? ' selected' : ''}>${esc(p)}</option>`).join('')}</select>` : '');
+  }
+
+  function cfSettings(c, i, r) {
+    const totals = `<label><input type="checkbox" data-i="${i}" data-k="totals"${r.totals ? ' checked' : ''}> Also color totals and subtotals</label>`;
+    if (r.type === 'bars') return `<div class="cfset">${totals}</div>`;
+    if (r.type === 'scale') {
+      return `<div class="cfset"><label>Colors <select data-i="${i}" data-k="better">
+          <option value="higher"${r.better !== 'lower' && r.better !== 'none' ? ' selected' : ''}>Higher is better</option>
+          <option value="lower"${r.better === 'lower' ? ' selected' : ''}>Lower is better</option>
+          <option value="none"${r.better === 'none' ? ' selected' : ''}>No good or bad (one color)</option>
+        </select></label>${totals}</div>`;
+    }
+    const lower = r.better === 'lower';
+    return `<div class="cfset">
+        <label><select data-i="${i}" data-k="better" aria-label="Which direction is good">
+          <option value="higher"${!lower ? ' selected' : ''}>Higher is better</option>
+          <option value="lower"${lower ? ' selected' : ''}>Lower is better</option>
+        </select></label>
+        <label>${lower ? '✓ at or below' : '✕ below'} ${cutInputs(i, 'low', r.low)}</label>
+        <label>${lower ? '✕ above' : '✓ at or above'} ${cutInputs(i, 'high', r.high)}</label>
+        <label>Color the <select data-i="${i}" data-k="target"><option value="bg"${r.target !== 'text' ? ' selected' : ''}>background</option><option value="text"${r.target === 'text' ? ' selected' : ''}>text</option></select></label>
+        <label><input type="checkbox" data-i="${i}" data-k="symbols"${r.symbols !== false ? ' checked' : ''}> Show ✓ ! ✕ symbols</label>
+        ${totals}
+      </div><div class="hint">With one value, only that side is colored (useful for flagging just the problems). With both, values in between get ! Watch. Values are in the units shown, so 5 means 5% on a percent column.</div>`;
+  }
+
+  function renderFormatting() {
+    const nums = cols.map((c, i) => ({ c, i })).filter(x => x.c.isNum);
+    $('cfRows').innerHTML = nums.map(({ c, i }) => {
+      const r = cfg.cf[c.key] || {};
+      return `<tr>
+        <td class="name" title="${esc(c.key)}">${esc(c.name)}</td>
+        <td><select data-i="${i}" data-k="type" aria-label="Formatting style for ${esc(c.name)}">
+          <option value=""${!r.type ? ' selected' : ''}>None</option>
+          <option value="threshold"${r.type === 'threshold' ? ' selected' : ''}>Thresholds</option>
+          <option value="scale"${r.type === 'scale' ? ' selected' : ''}>Color scale</option>
+          <option value="bars"${r.type === 'bars' ? ' selected' : ''}>Data bars</option>
+        </select></td>
+        <td>${r.type ? cfSettings(c, i, r) : '<span class="muted">—</span>'}</td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="3" class="muted">No number columns on this table.</td></tr>';
+  }
+
+  function onCfChange(e) {
+    const el = e.target;
+    if (!el.dataset || el.dataset.i == null) return;
+    const c = cols[+el.dataset.i];
+    const k = el.dataset.k;
+    const r = Object.assign({}, cfg.cf[c.key]);
+    let rerender = false;
+    if (k === 'type') {
+      if (!el.value) { delete cfg.cf[c.key]; renderFormatting(); return; }
+      r.type = el.value;
+      if (!r.better) r.better = 'higher';
+      rerender = true;
+    } else if (k === 'better') { r.better = el.value; rerender = true; }
+    else if (k === 'target') r.target = el.value;
+    else if (k === 'symbols' || k === 'totals') r[k] = el.checked;
+    else if (/^(low|high)(Value|Param)$/.test(k)) {
+      const which = k.startsWith('low') ? 'low' : 'high';
+      const d = Object.assign({}, r[which]);
+      if (k.endsWith('Param')) { if (el.value) { d.param = el.value; delete d.value; } else delete d.param; rerender = true; }
+      else d.value = el.value === '' ? null : Number(el.value);
+      r[which] = d;
+    }
+    cfg.cf[c.key] = r;
+    if (rerender) renderFormatting();
+  }
+
   // ---------- rules ----------
 
   function describeRule(r) {
@@ -229,6 +305,8 @@
   function wire() {
     document.querySelectorAll('[role="tab"]').forEach(t => t.addEventListener('click', () => { readSimple(); showTab(t.dataset.tab); }));
     $('colRows').addEventListener('change', onColumnChange);
+    $('cfRows').addEventListener('change', onCfChange);
+    $('cfRows').addEventListener('input', e => { if (/Value$/.test(e.target.dataset.k || '')) onCfChange(e); });
     $('colRows').addEventListener('input', e => { if (['label', 'multiplier', 'urlLabel'].includes(e.target.dataset.k)) onColumnChange(e); });
     $('filename').addEventListener('input', preview);
     $('rulesFile').addEventListener('change', e => {
