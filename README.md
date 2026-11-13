@@ -28,6 +28,7 @@ A fast table for Tableau worksheets, with correct totals for ratio columns, head
 - Data bars: a bar behind each number, sized to the largest value on screen
 - Accessible by design: the colors are colorblind-safe (checked under protan, deutan and tritan simulation), text contrast stays above 5:1, and thresholds also show ✓ ! ✕ symbols plus screen-reader text, so meaning never depends on color alone
 - Totals and subtotals stay plain unless turned on per column. Formatting recalculates with filters
+- Viewers who find it distracting can choose Hide formatting from a column's menu. Like other viewer changes, it's saved in their own browser and undone by Reset, and their downloads match what they see
 - Excel keeps the colors and symbols (the cells stay real numbers), and data bars become Excel's own data bars
 
 **Headers from parameters**
@@ -45,7 +46,7 @@ A fast table for Tableau worksheets, with correct totals for ratio columns, head
 - File name template with `{sheet}`, `{date}`, `{time}` and `{param:Parameter Name}`
 
 **Viewer layouts**
-- When "Let viewers move, hide, resize and freeze columns" is on, a viewer's changes are saved in their own browser only. A "Custom layout · Reset" chip appears so they can return to the published layout
+- When "Let viewers move, hide, resize and freeze columns" is on, a viewer's changes (column order, hidden columns, widths, names, freeze, sort, subtotals, % of total columns and hidden formatting) are saved in their own browser only. A "Custom layout · Reset" chip appears so they can return to the published layout
 
 ## Totals rules
 

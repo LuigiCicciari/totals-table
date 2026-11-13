@@ -27,7 +27,7 @@
       export: { formats: 'excel', excelTotals: true, subtotals: true, filename: '{sheet} {date}' },
       links: {},
       cf: {},
-      layout: { order: [], hidden: [], widths: {}, labels: {}, freeze: 'auto', sort: null, groupBy: null, pct: [] }
+      layout: { order: [], hidden: [], widths: {}, labels: {}, freeze: 'auto', sort: null, groupBy: null, pct: [], cfOff: [] }
     };
   }
 
@@ -636,6 +636,7 @@
     cellFormat(c, v, isTotal) {
       const rule = this.cfg.cf[c.key];
       if (!rule || !rule.type || v == null || v !== v) return null;
+      if ((this.layout.cfOff || []).includes(c.key)) return null;
       if (isTotal && !rule.totals) return null;
       if (rule.type === 'threshold') {
         const lvl = this.cfLevel(rule, c, v);
@@ -671,6 +672,7 @@
     cfDescribe(c) {
       const r = this.cfg.cf[c.key];
       if (!r || !r.type) return '';
+      if ((this.layout.cfOff || []).includes(c.key)) return '\nFormatting: hidden (column menu → Show formatting)';
       if (r.type === 'bars') return '\nFormatting: data bars';
       if (r.type === 'scale') return '\nFormatting: color scale' + (r.better === 'none' ? '' : r.better === 'lower' ? ', lower is better' : ', higher is better');
       const name = d => d && d.param ? d.param : d && d.value !== '' && d.value != null ? d.value : null;
@@ -1180,6 +1182,11 @@
           lay.groupBy === c.key ? ['expand-all', 'Expand all'] : null, '-',
           ['rename', 'Rename…'], lay.labels && lay.labels[c.key] ? ['unrename', 'Reset name'] : null);
         // Shares only make sense for columns that add up, so ratio columns don't offer it.
+        // Viewers can hide formatting they find distracting; it's saved with their layout.
+        if (c.isNum && this.cfg.cf[c.key] && this.cfg.cf[c.key].type) {
+          const off = (lay.cfOff || []).includes(c.key);
+          items.push('-', [off ? 'cf-show' : 'cf-hide', off ? 'Show formatting' : 'Hide formatting']);
+        }
         const hasPct = (lay.pct || []).includes(c.key);
         if (c.virtual) items.push('-', ['pct-remove', 'Remove % of total column']);
         else if (c.isNum && (hasPct || (c.total && c.total.type === 'sum'))) items.push('-', [hasPct ? 'pct-remove' : 'pct-add', hasPct ? 'Remove % of total column' : 'Add % of total column']);
@@ -1233,6 +1240,8 @@
           return this.updateLayout({ labels });
         }
         case 'format': return this.openFormat();
+        case 'cf-hide': return this.updateLayout({ cfOff: (lay.cfOff || []).concat(c.key) });
+        case 'cf-show': return this.updateLayout({ cfOff: (lay.cfOff || []).filter(k => k !== c.key) });
         case 'pct-add': return this.updateLayout({ pct: (lay.pct || []).concat(c.key) });
         case 'pct-remove': {
           const src = c.virtual ? c.srcKey : c.key;
