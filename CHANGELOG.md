@@ -2,6 +2,11 @@
 
 All notable changes to Totals Table. Versions follow [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH, where a patch fixes bugs, a minor version adds features without breaking anything, and a major version changes something existing (read its notes before updating). The version in use shows when hovering the info icon in the table's toolbar.
 
+## 1.4.0 (2026-11-16)
+
+**Added**
+- Saved layouts remember the parameters that decide what columns show: parameters linked to a column header (for example a "Column 1" parameter set to Category or Region) and parameters used by Hide when rules. Switching to a layout sets them again, along with its column arrangement, so a "Category View" and a "Region View" can each bring back their own columns. Date ranges and other parameters are never saved or changed. Changing one of those parameters by hand marks the layout as edited, and Update saves the new choice. A saved value that is no longer available is skipped with a short note. Export and import include these values. Layouts saved before this version pick them up the next time they're updated.
+
 ## 1.3.5 (2026-11-16)
 
 **Changed**

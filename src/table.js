@@ -10,7 +10,7 @@
   const MAX_LEVELS = 3;
   const NUL = '\u0000null';
   // Semantic version (MAJOR.MINOR.PATCH); see CHANGELOG.md. The ?v= tags in the HTML are only for browser caches.
-  const VERSION = '1.3.5';
+  const VERSION = '1.4.0';
   const calcKey = d => d.kind === 'rank' ? '__rank:' + (d.dir || 'desc') + ':' + d.src : d.kind === 'run' ? '__run:' + d.src : '__' + d.kind + ':' + d.src + '|' + d.other;
 
   function defaults() {
@@ -1862,7 +1862,7 @@
       try {
         const p = JSON.parse(localStorage.getItem(this.presetKey()) || 'null');
         if (p && Array.isArray(p.list)) {
-          const list = p.list.filter(x => x && typeof x.name === 'string' && x.name.trim()).map(x => ({ name: x.name, layout: cleanLayout(x.layout), savedAt: x.savedAt }));
+          const list = p.list.filter(x => x && typeof x.name === 'string' && x.name.trim()).map(x => ({ name: x.name, layout: cleanLayout(x.layout), params: cleanParams(x.params), savedAt: x.savedAt }));
           this.presets = { list, active: list.some(x => x.name === p.active) ? p.active : null };
         }
       } catch (e) { /* keep empty */ }
@@ -1875,7 +1875,50 @@
 
     activePreset() { return this.presets && this.presets.active ? this.presets.list.find(p => p.name === this.presets.active) || null : null; }
 
-    presetEdited(p) { return JSON.stringify(this.local || {}) !== JSON.stringify(p.layout || {}); }
+    // A layout is edited when its arrangement or any of its saved column parameters has changed.
+    presetEdited(p) {
+      if (JSON.stringify(this.local || {}) !== JSON.stringify(p.layout || {})) return true;
+      const cur = this.captureParams();
+      return Object.keys(p.params || {}).some(n => n in cur && String(cur[n]) !== String(p.params[n]));
+    }
+
+    // Parameters that decide what a column shows: ones linked to a column header and ones used by Hide when
+    // rules. Layouts save and restore only these, never date ranges or other dashboard settings.
+    layoutParamNames() {
+      const names = new Set();
+      for (const c of this.store ? this.store.columns : []) {
+        if (c.virtual) continue;
+        const p = this.paramFor(c);
+        if (p) names.add(p.name);
+      }
+      for (const r of Object.values(this.cfg.hideWhen || {})) if (r && r.param) names.add(String(r.param));
+      return Array.from(names).filter(n => this.params.some(p => p.name.toLowerCase() === n.toLowerCase()));
+    }
+
+    captureParams() {
+      const out = {};
+      for (const n of this.layoutParamNames()) {
+        const p = this.params.find(x => x.name.toLowerCase() === n.toLowerCase());
+        const v = p.raw;
+        if (v === null || v === undefined || typeof v === 'object') out[p.name] = p.value;
+        else out[p.name] = v;
+      }
+      return out;
+    }
+
+    // Sets saved parameter values (only those that differ). Values no longer allowed are skipped with a note.
+    async restoreParams(saved) {
+      let failed = 0, changed = 0;
+      for (const [name, value] of Object.entries(saved || {})) {
+        const obj = (this.paramObjs || []).find(p => p.name.toLowerCase() === name.toLowerCase());
+        const cur = this.params.find(p => p.name.toLowerCase() === name.toLowerCase());
+        if (!obj || !obj.changeValueAsync) { failed++; continue; }
+        if (cur && (String(cur.raw) === String(value) || String(cur.value) === String(value))) continue;
+        try { await obj.changeValueAsync(value); changed++; } catch (e) { failed++; }
+      }
+      if (changed) await this.onParamChanged();
+      if (failed) this.flash('Some saved column settings could not be restored, so the dashboard keeps its current choice for them.');
+    }
 
     setLocal(layout) {
       this.local = layout && Object.keys(layout).length ? JSON.parse(JSON.stringify(layout)) : null;
@@ -1892,6 +1935,8 @@
       this.savePresets();
       this.collapsed = new Set();
       this.refresh();
+      // Then set the column parameters the layout was saved with, which also updates the dashboard's controls.
+      if (p.params && Object.keys(p.params).length) return this.restoreParams(p.params);
     }
 
     savePresetAs(name) {
@@ -1899,7 +1944,7 @@
       if (!name) return;
       const layout = JSON.parse(JSON.stringify(this.local || {}));
       const at = this.presets.list.findIndex(x => x.name === name);
-      const entry = { name, layout, savedAt: new Date().toISOString() };
+      const entry = { name, layout, params: this.captureParams(), savedAt: new Date().toISOString() };
       if (at >= 0) this.presets.list[at] = entry; else this.presets.list.push(entry);
       this.presets.active = name;
       this.savePresets();
@@ -1929,7 +1974,7 @@
       let n = 0;
       for (const p of doc.layouts) {
         if (!p || typeof p.name !== 'string' || !p.name.trim() || typeof p.layout !== 'object') continue;
-        const entry = { name: p.name.trim().slice(0, 60), layout: cleanLayout(p.layout), savedAt: typeof p.savedAt === 'string' ? p.savedAt : new Date().toISOString() };
+        const entry = { name: p.name.trim().slice(0, 60), layout: cleanLayout(p.layout), params: cleanParams(p.params), savedAt: typeof p.savedAt === 'string' ? p.savedAt : new Date().toISOString() };
         const at = this.presets.list.findIndex(x => x.name === entry.name);
         if (at >= 0) this.presets.list[at] = entry; else this.presets.list.push(entry);
         n++;
@@ -1993,7 +2038,7 @@
             this.savePresets();
             return this.refresh();
           }
-          if (a === 'update') { act.layout = JSON.parse(JSON.stringify(this.local || {})); act.savedAt = new Date().toISOString(); this.savePresets(); this.refresh(); return this.flashOk('Updated "' + act.name + '"'); }
+          if (a === 'update') { act.layout = JSON.parse(JSON.stringify(this.local || {})); act.params = this.captureParams(); act.savedAt = new Date().toISOString(); this.savePresets(); this.refresh(); return this.flashOk('Updated "' + act.name + '"'); }
           if (a === 'undo') return this.applyPreset(act.name);
           if (a === 'delete') {
             this.presets.list = L.filter(x => x !== act);
@@ -2517,6 +2562,14 @@
         this.flash('Download failed: ' + ((e && e.message) || e));
       }
     }
+  }
+
+  // Saved parameter values: plain strings, numbers and true/false only.
+  function cleanParams(o) {
+    const out = {};
+    if (!o || typeof o !== 'object' || Array.isArray(o)) return out;
+    for (const k of Object.keys(o)) { const v = o[k]; if (['string', 'number', 'boolean'].includes(typeof v)) out[k] = v; }
+    return out;
   }
 
   function fieldOverlap(a, b) {
