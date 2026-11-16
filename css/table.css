@@ -151,3 +151,11 @@ button, input, select { font: inherit; color: inherit; }
 .tp-menu .tp-lnote button.linkish:hover { background: none; }
 .tp-empty { position: sticky; left: 0; padding: 16px 12px; color: var(--tp-muted); white-space: nowrap; }
 .tp-empty button { margin-left: 6px; border: 1px solid var(--tp-line-strong); background: #fff; border-radius: 4px; padding: 2px 8px; cursor: pointer; color: var(--tp-accent); }
+/* Top N: the Other row and the picker */
+.tp-other .tp-c { font-style: italic; font-weight: 500; }
+.tp-topn { max-width: 300px; }
+.tp-tnrow { display: flex; align-items: center; gap: 4px; padding: 2px 8px; }
+.tp-tnrow span { width: 54px; color: var(--tp-muted); }
+.tp-menu .tp-tnrow button { padding: 3px 9px; border: 1px solid var(--tp-line-strong); }
+.tp-menu .tp-tnrow button[aria-pressed="true"] { background: var(--tp-accent); color: #fff; border-color: var(--tp-accent); }
+.tp-topn .tp-lname button + button { margin-left: 0; }

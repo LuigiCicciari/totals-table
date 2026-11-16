@@ -151,7 +151,7 @@
       }
     }
     styleRow(ws.addRow(cols.map(c => cleanText(c.label))), 'header');
-    if (top) { const tv = totalsValues(snap.totals, 'Total'); const tr = ws.addRow(tv); styleRow(tr, 'totals'); applyFormat(tr, tv, true); }
+    if (top) { const totVals = totalsValues(snap.totals, 'Total'); const tr = ws.addRow(totVals); styleRow(tr, 'totals'); applyFormat(tr, totVals, true); }
     const firstData = ws.rowCount + 1;
     for (const r of snap.rows) {
       if (r.type === 'group') {
@@ -175,7 +175,7 @@
       }
     }
     const lastData = ws.rowCount;
-    if (bottom) { const tv = totalsValues(snap.totals, 'Total'); const tr = ws.addRow(tv); styleRow(tr, 'totals'); applyFormat(tr, tv, true); }
+    if (bottom) { const totVals = totalsValues(snap.totals, 'Total'); const tr = ws.addRow(totVals); styleRow(tr, 'totals'); applyFormat(tr, totVals, true); }
     // Column alignment overrides, below the (centered) group header row, including a bottom totals row.
     cols.forEach((c, k) => {
       if (!c.align) return;

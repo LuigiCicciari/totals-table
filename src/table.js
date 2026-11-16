@@ -10,7 +10,7 @@
   const MAX_LEVELS = 3;
   const NUL = '\u0000null';
   // Semantic version (MAJOR.MINOR.PATCH); see CHANGELOG.md. The ?v= tags in the HTML are only for browser caches.
-  const VERSION = '1.1.0';
+  const VERSION = '1.2.0';
   const calcKey = d => d.kind === 'rank' ? '__rank:' + (d.dir || 'desc') + ':' + d.src : d.kind === 'run' ? '__run:' + d.src : '__' + d.kind + ':' + d.src + '|' + d.other;
 
   function defaults() {
@@ -37,7 +37,7 @@
       colFormat: {},
       // Whole-table look. The defaults are the original design, so nothing changes until an author sets something.
       style: { size: 'normal', density: 'normal', text: '#1f2328', headBg: '#f6f8fa', headText: '#1f2328', headBold: true, headWrap: false, lines: 'both', banding: true, totBg: '#fbfbfc', totBold: true, subBg: '#f3f5f8', subBold: true, neg: '', accent: '#1f6feb' },
-      layout: { order: [], hidden: [], widths: {}, labels: {}, freeze: 'auto', sort: null, groupBy: null, pct: [], calc: [], cfOff: [], hideGroups: false }
+      layout: { order: [], hidden: [], widths: {}, labels: {}, freeze: 'auto', sort: null, groupBy: null, pct: [], calc: [], cfOff: [], hideGroups: false, topN: null }
     };
   }
 
@@ -91,6 +91,7 @@
       this.filters = {};
       this.search = '';
       this.collapsed = new Set();
+      this.otherOpen = new Set();
       this.selected = new Set();
       this.range = null;
       this.gen = 0;
@@ -543,6 +544,7 @@
       this.sortRows(idx, this.sortList(), cols);
       const totals = this.computeTotals(cols, idx);
       this.computeCfStats(cols, idx);
+      this.viewCols = cols;
       const disp = this.groupRows(cols, idx, this.groupKeys());
       this.fillRunning(cols, idx);
       this.view = { cols, idx, disp, totals, nFrozen, spans: this.groupSpans(cols) };
@@ -773,7 +775,14 @@
       const gcs = keys.map(k => cols.find(c => c.key === k)).filter(Boolean);
       this.groups = null;
       this.groupCols = gcs;
-      if (!gcs.length) return idx;
+      this.topRoot = null;
+      if (!gcs.length) {
+        if (!this.topNActive()) return idx;
+        this.topRoot = this.topFor(idx, '', 0, cols);
+        const flat = [];
+        this.emitTop(flat, this.topRoot, idx);
+        return flat;
+      }
       const sorts = this.sortList();
       const firstNum = sorts.map(s => cols.find(c => c.key === s.key)).find(c => c && c.isNum);
       const numDir = firstNum && sorts.find(s => s.key === firstNum.key).dir === 'desc' ? -1 : 1;
@@ -795,6 +804,7 @@
           g.totals = {};
           for (const c of cols) if (c.isNum) g.totals[c.key] = this.totalOf(c, g.rows);
           if (level + 1 < gcs.length) g.children = build(g.rows, level + 1, g.key + '\u0001');
+          else g.top = this.topFor(g.rows, g.key, level + 1, cols);
         }
         // A sort on this level's own column orders its groups by name. Otherwise the first number sort orders
         // the groups at every level by their subtotal, as well as the rows inside them.
@@ -824,11 +834,61 @@
         for (const g of list) {
           disp.push(g);
           if (this.collapsed.has(g.key)) continue;
-          if (g.children) walk(g.children); else for (const i of g.rows) disp.push(i);
+          if (g.children) walk(g.children);
+          else this.emitTop(disp, g.top, g.rows);
         }
       };
       walk(this.groups);
       return disp;
+    }
+
+    // ---------- top N ----------
+
+    // The active Top N, if its column is on screen.
+    topNActive() {
+      const t = this.layout.topN;
+      if (!t || !t.key || !(t.n > 0)) return null;
+      const c = this.colDef(t.key);
+      return c && c.isNum && this.view && (this.viewCols || []).some(x => x.key === t.key) ? t : null;
+    }
+
+    // Splits rows (already in display order) into the top N by the chosen column and the rest. Zeros and blanks
+    // never make the top; ties at the cutoff follow the display order.
+    topSplit(rows, t) {
+      const v = this.store.raw[t.key];
+      const dir = t.dir === 'bottom' ? 1 : -1;
+      const cand = rows.map((i, pos) => ({ i, pos })).filter(o => v[o.i] === v[o.i] && v[o.i] != null && v[o.i] !== 0);
+      cand.sort((a, b) => dir * (v[a.i] - v[b.i]) || a.pos - b.pos);
+      const keep = new Set(cand.slice(0, t.n).map(o => o.i));
+      return { shown: rows.filter(i => keep.has(i)), other: rows.filter(i => !keep.has(i)) };
+    }
+
+    // Works out the top rows and the "Other" row (which totals the rest with the usual rules) for a group or the
+    // whole table. Null when Top N is off.
+    topFor(rows, key, level, cols) {
+      const t = this.topNActive();
+      if (!t) return null;
+      const { shown, other } = this.topSplit(rows, t);
+      if (!other.length) return { shown, node: null };
+      const node = { type: 'group', isOther: true, key: '\u0002other\u0001' + key, label: 'Other', rows: other, level, colKey: this.otherLabelKey(cols), totals: {} };
+      for (const c of cols) if (c.isNum) node.totals[c.key] = this.totalOf(c, other);
+      return { shown, node };
+    }
+
+    // Adds the rows to the display: all of them, or the top rows, then Other (and its rows when it is open).
+    emitTop(disp, top, rows) {
+      if (!top) { for (const i of rows) disp.push(i); return; }
+      for (const i of top.shown) disp.push(i);
+      if (!top.node) return;
+      disp.push(top.node);
+      if (this.otherOpen.has(top.node.key)) for (const i of top.node.rows) disp.push(i);
+    }
+
+    // The Other label goes in the first text column that isn't a subtotal column.
+    otherLabelKey(cols) {
+      const g = new Set((this.groupCols || []).map(c => c.key));
+      const c = cols.find(x => !x.isNum && !g.has(x.key)) || cols.find(x => !x.isNum) || cols[0];
+      return c ? c.key : null;
     }
 
     groupsAtLevel(level) {
@@ -885,7 +945,11 @@
       this.searchEl.addEventListener('input', () => { clearTimeout(this.searchT); this.searchT = setTimeout(() => { this.search = this.searchEl.value.trim(); this.refresh(); }, 150); });
       q('.tp-lchip').addEventListener('click', e => { if (e.currentTarget.dataset.mode === 'menu') this.openPresets(e.currentTarget); else this.resetLocal(); });
       q('.tp-lay').addEventListener('click', e => this.openPresets(e.currentTarget));
-      q('.tp-vfs').addEventListener('click', e => { const b = e.target.closest('button[data-k]'); if (b) this.clearValueFilter(b.dataset.k); });
+      q('.tp-vfs').addEventListener('click', e => {
+        if (e.target.closest('button[data-top]')) return this.updateLayout({ topN: null });
+        const b = e.target.closest('button[data-k]');
+        if (b) this.clearValueFilter(b.dataset.k);
+      });
       q('.tp-cols').addEventListener('click', e => this.openColumnsPicker(e.currentTarget));
       q('.tp-dl').addEventListener('click', e => this.onDownloadClick(e.currentTarget));
       q('.tp-gear').addEventListener('click', () => this.openFormat());
@@ -931,6 +995,11 @@
           const text = c.label + (f.keep ? ': only ' : ': not ') + (list.length > 2 ? list.slice(0, 2).join(', ') + ' +' + (list.length - 2) : list.join(', '));
           chips.push(`<button type="button" class="tp-chip tp-vchip" data-k="${esc(c.key)}" title="${esc(c.label + (f.keep ? ' kept: ' : ' excluded: ') + list.join(', ') + '\nClick to remove this filter')}">${esc(text.length > 48 ? text.slice(0, 47) + '…' : text)} ✕</button>`);
         }
+      }
+      const top = st && this.topNActive();
+      if (top) {
+        const tc = this.colDef(top.key);
+        chips.push(`<button type="button" class="tp-chip tp-vchip" data-top="1" title="Showing the ${top.dir === 'bottom' ? 'smallest' : 'largest'} ${top.n} rows${this.groups ? ' in each group' : ''}; the rest are in Other.\nClick to show all rows">${esc((top.dir === 'bottom' ? 'Bottom ' : 'Top ') + top.n + ' by ' + this.labelFor(tc))} ✕</button>`);
       }
       const vfs = q('.tp-vfs');
       const html = chips.join('');
@@ -1192,8 +1261,8 @@
       for (let r = start; r < end; r++) {
         const d = disp[r];
         if (typeof d === 'object') {
-          const open = !this.collapsed.has(d.key);
-          h += `<div class="tp-row tp-grp l${d.level}" data-r="${r}">`;
+          const open = d.isOther ? this.otherOpen.has(d.key) : !this.collapsed.has(d.key);
+          h += `<div class="tp-row tp-grp l${d.level}${d.isOther ? ' tp-other' : ''}" data-r="${r}">`;
           cols.forEach((c, j) => {
             if (c.key === d.colKey) h += `<div ${this.cellAttrs(c)} data-c="${j}"><span class="tp-caret">${open ? '▾' : '▸'}</span>${esc(d.label)} <span class="tp-cnt">(${d.rows.length.toLocaleString()})</span></div>`;
             else if (c.isNum) {
@@ -1580,7 +1649,8 @@
     clickRow(r, toggle, point) {
       const d = this.view.disp[r];
       if (typeof d === 'object') {
-        if (this.collapsed.has(d.key)) this.collapsed.delete(d.key); else this.collapsed.add(d.key);
+        const set = d.isOther ? this.otherOpen : this.collapsed;
+        if (set.has(d.key)) set.delete(d.key); else set.add(d.key);
         this.computeView();
         this.renderBody(true);
         return;
@@ -1641,7 +1711,7 @@
         const all = [];
         for (const d of disp) {
           if (typeof d === 'number') all.push(d);
-          else if (this.collapsed.has(d.key)) all.push(...d.rows);
+          else if (d.isOther ? !this.otherOpen.has(d.key) : this.collapsed.has(d.key)) all.push(...d.rows);
         }
         rows = all.map(i => ({ i }));
       } else if (rg && !(rg.r0 === rg.r1 && rg.c0 === rg.c1 && this.selected.size > 1)) {
@@ -1928,7 +1998,9 @@
             !has({ kind: 'rank', src: c.key, dir: 'desc' }) ? ['rank-desc', 'Add rank (largest = 1)'] : null,
             !has({ kind: 'rank', src: c.key, dir: 'asc' }) ? ['rank-asc', 'Add rank (smallest = 1)'] : null,
             sums && !has({ kind: 'run', src: c.key }) ? ['run', 'Add running total'] : null,
-            ['compare', 'Compare with another column…']);
+            ['compare', 'Compare with another column…'],
+            '-', ['topn', 'Show top or bottom…'],
+            lay.topN && lay.topN.key === c.key ? ['topn-off', 'Show all rows'] : null);
         }
       }
       items.push('-', ['stats', 'Column stats…']);
@@ -1952,6 +2024,7 @@
         }
         if (b.dataset.a === 'g-new') return this.askName(anchor, 'Group name (shown above this column)', '', name => this.setGroups(g => { g[c.key] = name; }));
         if (b.dataset.a === 'compare') return this.openCompare(i, anchor);
+        if (b.dataset.a === 'topn') return this.openTopN(i, anchor);
         this.menuAction(b.dataset.a, i, c);
       }));
     }
@@ -2021,6 +2094,29 @@
         top.forEach(([v, k], j) => lines.push([j ? '' : 'Most common', v + ' (' + count(k) + ' rows)']));
       }
       return lines;
+    }
+
+    openTopN(i, anchor) {
+      const c = this.view.cols[i];
+      const cur = this.layout.topN && this.layout.topN.key === c.key ? this.layout.topN : null;
+      const btn = (dir, n) => `<button type="button" data-dir="${dir}" data-n="${n}"${cur && cur.dir === dir && cur.n === n ? ' aria-pressed="true"' : ''}>${n}</button>`;
+      const html = `<div class="tp-menu tp-topn"><div class="tp-ph">Show by ${esc(c.label)}</div>` +
+        `<div class="tp-tnrow"><span>Top</span>${[5, 10, 20, 50].map(n => btn('top', n)).join('')}</div>` +
+        `<div class="tp-tnrow"><span>Bottom</span>${[5, 10, 20, 50].map(n => btn('bottom', n)).join('')}</div>` +
+        `<div class="tp-lname"><input type="number" min="1" step="1" placeholder="Other number" aria-label="Number of rows"><button type="button" data-custom="top">Top</button><button type="button" data-custom="bottom">Bottom</button></div>` +
+        `<div class="tp-lnote">The rest of the rows${this.groups ? ' in each group' : ''} are combined into an Other row. Totals still include every row.</div></div>`;
+      this.openPop(anchor, html, pop => pop.addEventListener('click', e => {
+        const b = e.target.closest('button');
+        if (!b) return;
+        let dir = b.dataset.dir, n = +b.dataset.n;
+        if (b.dataset.custom) { dir = b.dataset.custom; n = Math.floor(+pop.querySelector('input').value); }
+        if (!dir || !(n >= 1)) return;
+        this.closePop();
+        // With no sort chosen, the shown rows are also sorted by the same column, largest (or smallest) first.
+        const patch = { topN: { key: c.key, n: Math.min(n, 100000), dir } };
+        if (!this.sortList().length) patch.sort = [{ key: c.key, dir: dir === 'bottom' ? 'asc' : 'desc' }];
+        this.updateLayout(patch);
+      }));
     }
 
     openCompare(i, anchor) {
@@ -2119,6 +2215,7 @@
         case 'calc-remove':
           if (c.vkind === 'pct') return this.updateLayout({ pct: (lay.pct || []).filter(k => k !== c.srcKey) });
           return this.updateLayout({ calc: (lay.calc || []).filter(d => calcKey(d) !== c.key) });
+        case 'topn-off': return this.updateLayout({ topN: null });
         case 'pct-add': return this.updateLayout({ pct: (lay.pct || []).concat(c.key) });
         case 'pct-remove': {
           const src = c.virtual ? c.srcKey : c.key;
@@ -2257,8 +2354,16 @@
         return f == null ? { kind: 'null' } : { kind: 'text', v: f };
       };
       // Every row is exported whatever is collapsed on screen; outline levels and hidden flags let Excel
-      // start with the same groups collapsed.
+      // start with the same groups collapsed. With Top N, the top rows come first, then the Other row with the
+      // rest grouped under it (closed unless it is open on screen).
       let rows;
+      const pushTop = (top, level, hid) => {
+        for (const i of top.shown) rows.push({ type: 'data', i, level, hidden: hid });
+        const n = top.node;
+        const open = this.otherOpen.has(n.key);
+        rows.push({ type: 'group', label: 'Other (' + n.rows.length.toLocaleString() + (n.rows.length === 1 ? ' row)' : ' rows)'), totals: Object.assign({ __label: n.colKey }, n.totals), collapsed: !open, level, hidden: hid });
+        for (const i of n.rows) rows.push({ type: 'data', i, level: level + 1, hidden: hid || !open });
+      };
       if (this.groups) {
         rows = [];
         const walk = (list, hiddenAbove) => {
@@ -2267,10 +2372,14 @@
             rows.push({ type: 'group', label: g.label + ' subtotal', totals: Object.assign({ __label: g.colKey }, g.totals), collapsed, level: g.level, hidden: hiddenAbove });
             const hid = hiddenAbove || collapsed;
             if (g.children) walk(g.children, hid);
+            else if (g.top && g.top.node) pushTop(g.top, g.level + 1, hid);
             else for (const i of g.rows) rows.push({ type: 'data', i, level: g.level + 1, hidden: hid });
           }
         };
         walk(this.groups, false);
+      } else if (this.topRoot && this.topRoot.node) {
+        rows = [];
+        pushTop(this.topRoot, 0, false);
       } else {
         rows = this.view.idx.map(i => ({ type: 'data', i }));
       }
@@ -2362,6 +2471,10 @@
       )).map(d => { const o = { kind: d.kind, src: d.src }; if (d.dir) o.dir = d.dir; if (d.other) o.other = d.other; return o; });
     }
     if ('hideGroups' in l) out.hideGroups = !!l.hideGroups;
+    if (l.topN === null) out.topN = null;
+    else if (l.topN && typeof l.topN.key === 'string' && (l.topN.dir === 'top' || l.topN.dir === 'bottom') && Number.isInteger(l.topN.n) && l.topN.n > 0) {
+      out.topN = { key: l.topN.key, n: Math.min(l.topN.n, 100000), dir: l.topN.dir };
+    }
     return out;
   }
 

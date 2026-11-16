@@ -2,6 +2,11 @@
 
 All notable changes to Totals Table. Versions follow [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH, where a patch fixes bugs, a minor version adds features without breaking anything, and a major version changes something existing (read its notes before updating). The version in use shows when hovering the info icon in the table's toolbar.
 
+## 1.2.0 (2026-11-16)
+
+**Added**
+- Top and bottom N: from a number column's menu, choose Show top or bottom (5, 10, 20, 50 or any number), for example the top 10 cities by Sales. The rest are combined into an "Other" row that totals them with the usual rules (Profit Ratio stays a true ratio) and opens with a click to show its rows. With subtotals, each group gets its own top rows and Other row. Grand totals and subtotals still include every row. Zeros and blanks never make the top. A chip above the table shows it is on and turns it off. Excel matches the screen with each Other row grouped and closed; CSV still has every row.
+
 ## 1.1.0 (2026-11-16)
 
 **Added**
