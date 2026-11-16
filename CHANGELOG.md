@@ -2,6 +2,11 @@
 
 All notable changes to Totals Table. Versions follow [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH, where a patch fixes bugs, a minor version adds features without breaking anything, and a major version changes something existing (read its notes before updating). The version in use shows when hovering the info icon in the table's toolbar.
 
+## 1.4.1 (2026-11-16)
+
+**Fixed**
+- A saved layout that doesn't have its column settings yet (such as one saved before 1.4.0) now shows as edited, so "Update" appears in the Layouts menu and saves them in one click.
+
 ## 1.4.0 (2026-11-16)
 
 **Added**

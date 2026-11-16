@@ -10,7 +10,7 @@
   const MAX_LEVELS = 3;
   const NUL = '\u0000null';
   // Semantic version (MAJOR.MINOR.PATCH); see CHANGELOG.md. The ?v= tags in the HTML are only for browser caches.
-  const VERSION = '1.4.0';
+  const VERSION = '1.4.1';
   const calcKey = d => d.kind === 'rank' ? '__rank:' + (d.dir || 'desc') + ':' + d.src : d.kind === 'run' ? '__run:' + d.src : '__' + d.kind + ':' + d.src + '|' + d.other;
 
   function defaults() {
@@ -1879,7 +1879,10 @@
     presetEdited(p) {
       if (JSON.stringify(this.local || {}) !== JSON.stringify(p.layout || {})) return true;
       const cur = this.captureParams();
-      return Object.keys(p.params || {}).some(n => n in cur && String(cur[n]) !== String(p.params[n]));
+      const saved = p.params || {};
+      // A layout saved without a column setting (for example before layouts kept them) counts as edited,
+      // so Update appears and saves it.
+      return Object.keys(cur).some(n => !(n in saved) || String(cur[n]) !== String(saved[n]));
     }
 
     // Parameters that decide what a column shows: ones linked to a column header and ones used by Hide when
