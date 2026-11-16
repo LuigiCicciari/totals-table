@@ -10,7 +10,7 @@
   const MAX_LEVELS = 3;
   const NUL = '\u0000null';
   // Semantic version (MAJOR.MINOR.PATCH); see CHANGELOG.md. The ?v= tags in the HTML are only for browser caches.
-  const VERSION = '1.3.2';
+  const VERSION = '1.3.3';
   const calcKey = d => d.kind === 'rank' ? '__rank:' + (d.dir || 'desc') + ':' + d.src : d.kind === 'run' ? '__run:' + d.src : '__' + d.kind + ':' + d.src + '|' + d.other;
 
   function defaults() {
@@ -1615,6 +1615,15 @@
         this.clickRow(ds.r, e.ctrlKey || e.metaKey, { x: e.clientX, y: e.clientY });
       });
       this.rowsEl.addEventListener('mouseleave', () => this.unhover());
+      this.scroller.addEventListener('mousedown', e => {
+        if (e.button !== 0 || e.target.closest('[data-c], .tp-top, .tp-tot, .tp-g, input, button, a')) return;
+        // Ignore the scrollbars, which belong to the scroller itself.
+        if (e.target === this.scroller && (e.offsetX >= this.scroller.clientWidth || e.offsetY >= this.scroller.clientHeight)) return;
+        this.clearSelection();
+      });
+      this.el.querySelector('.tp-bar').addEventListener('mousedown', e => {
+        if (e.button === 0 && !e.target.closest('button, input')) this.clearSelection();
+      });
       this.rowsEl.addEventListener('click', e => { if (e.target.closest('button[data-a="clear-filters"]')) this.clearFilters(); });
       // Right-click copy: Tableau Desktop keeps Ctrl+C for itself, so this is the reliable way to copy.
       this.rowsEl.addEventListener('contextmenu', e => {
@@ -1697,6 +1706,20 @@
       this.refresh();
     }
 
+    // Clears selected rows (here and on the dashboard) and any highlighted cells.
+    clearSelection() {
+      const had = this.selected.size > 0;
+      if (!had && !this.range) return;
+      this.selected.clear();
+      this.range = null;
+      this.renderBody(true);
+      if (had) {
+        const ws = this.ws;
+        const p = ws.clearSelectedMarksAsync ? ws.clearSelectedMarksAsync() : ws.selectTuplesAsync([], tableau.SelectOptions.Simple);
+        Promise.resolve(p).catch(() => { /* selection is best effort */ });
+      }
+    }
+
     normRange() {
       const g = this.range;
       if (!g) return null;
@@ -1715,7 +1738,7 @@
       const tid = this.store.tuple[d];
       if (tid == null) { this.renderBody(true); return; }
       if (toggle) { if (this.selected.has(tid)) this.selected.delete(tid); else this.selected.add(tid); }
-      else if (this.selected.size === 1 && this.selected.has(tid)) this.selected.clear();
+      else if (this.selected.size === 1 && this.selected.has(tid)) { this.selected.clear(); this.range = null; }
       else { this.selected.clear(); this.selected.add(tid); }
       this.renderBody(true);
       const ids = Array.from(this.selected);
@@ -1753,7 +1776,7 @@
         e.preventDefault();
         this.copyToClipboard(text);
       } else if (e.key === 'Escape') {
-        this.closePop();
+        if (!this.pop.hidden) this.closePop(); else this.clearSelection();
       }
     }
 
@@ -1794,7 +1817,10 @@
     // execCommand first: it works inside embedded frames where the newer clipboard API is often blocked.
     copyToClipboard(text, rowCount) {
       const lines = text.split('\n').length;
-      const done = () => this.flashOk('Copied ' + (rowCount != null ? rowCount.toLocaleString() + ' rows' : lines > 1 ? lines + ' lines' : 'cell'));
+      const done = () => {
+        this.flashOk('Copied ' + (rowCount != null ? rowCount.toLocaleString() + ' rows' : lines > 1 ? lines + ' lines' : 'cell'));
+        if (this.range) { this.range = null; this.renderBody(true); }
+      };
       if (this.copyViaTextarea(text)) return done();
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(text).then(done, () => this.flash('Copy is blocked here'));

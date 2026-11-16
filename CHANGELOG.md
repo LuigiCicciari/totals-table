@@ -2,6 +2,11 @@
 
 All notable changes to Totals Table. Versions follow [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH, where a patch fixes bugs, a minor version adds features without breaking anything, and a major version changes something existing (read its notes before updating). The version in use shows when hovering the info icon in the table's toolbar.
 
+## 1.3.3 (2026-11-16)
+
+**Changed**
+- Clearing a selection works the way it does in Tableau and spreadsheets: click the selected row again, click any empty space in the table (below the rows, right of the last column, or the bar above the table), or press Esc. Each clears the selected rows, their selection on the rest of the dashboard, and the highlighted cells. Copying also clears the cell highlight, since it has done its job.
+
 ## 1.3.2 (2026-11-16)
 
 **Fixed**
