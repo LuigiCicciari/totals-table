@@ -6,11 +6,13 @@
 
   const TOTAL_TYPES = ['auto', 'sum', 'avg', 'min', 'max', 'ratio', 'none'];
 
-  // "AGG(Cost per Visit)" -> "Cost per Visit"; plain names pass through.
+  // "AGG(Cost per Visit)" -> "Cost per Visit"; plain names pass through. Only Tableau's own aggregation and date
+  // prefixes are removed, so a field named "Profit(Adj)" keeps its name.
+  const AGG_PREFIX = /^(AGG|SUM|AVG|MIN|MAX|MEDIAN|COUNT|COUNTD|CNT|CNTD|ATTR|STDEV|STDEVP|VAR|VARP|PCT\d*|YEAR|QUARTER|MONTH|WEEK|DAY|WEEKDAY|HOUR|MINUTE|SECOND|MDY|MY|YR|QR|MN|DY|WK|TYR|TQR|TMN|TWK|TDY|USR|NONE)\((.*)\)$/i;
   function normName(fieldName) {
     const s = String(fieldName == null ? '' : fieldName).trim();
-    const m = s.match(/^[A-Za-z]{2,12}\((.*)\)$/);
-    return (m ? m[1] : s).trim();
+    const m = s.match(AGG_PREFIX);
+    return (m ? m[2] : s).trim();
   }
 
   function eq(a, b) { return String(a).trim().toLowerCase() === String(b).trim().toLowerCase(); }
@@ -46,6 +48,8 @@
       if (!t || !TOTAL_TYPES.includes(t.type) || t.type === 'auto') throw new Error('Rule ' + (i + 1) + ' has an invalid total type.');
       if (t.type === 'ratio' && (!t.numerator || !t.denominator)) throw new Error('Rule ' + (i + 1) + ' is a ratio but is missing numerator or denominator.');
     });
+    const d = obj.default;
+    if (d != null && (typeof d !== 'object' || !['sum', 'avg', 'min', 'max', 'none'].includes(d.type))) throw new Error('"default" must have a type of sum, avg, min, max or none.');
     return obj;
   }
 
@@ -236,13 +240,17 @@
 
   // ---- dates ----
 
-  const ISO_RE = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?/;
+  // The whole value must be a date (or date and time), so codes like "2024-03-15_Spring" stay text.
+  const ISO_RE = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?Z?)?$/;
 
   function parseIsoDate(s) {
     const m = typeof s === 'string' && s.match(ISO_RE);
     if (!m) return null;
     const t = Date.UTC(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0));
-    return isNaN(t) ? null : { t, time: m[4] !== undefined };
+    if (isNaN(t)) return null;
+    const d = new Date(t);
+    if (d.getUTCMonth() !== +m[2] - 1 || d.getUTCDate() !== +m[3]) return null;
+    return { t, time: m[4] !== undefined };
   }
 
   function inferDateFmt(formattedSamples, hasTime) {

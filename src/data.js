@@ -75,13 +75,14 @@
             if (/^https?:\/\/\S+$/i.test(s.trim())) urls++; else break;
           }
           c.isUrl = seen > 0 && urls === seen;
+          // Every row is checked (stopping at the first non-date), so a column is only treated as dates when all of it is.
           let nonNull = 0, iso = 0, time = false;
-          for (let i = 0; i < limit; i++) {
+          for (let i = 0; i < this.n; i++) {
             const s = fmt[i];
             if (s == null || s === '') continue;
             nonNull++;
             const d = R.parseIsoDate(s.trim());
-            if (d && s.trim().length <= 19) { iso++; time = time || d.time; } else break;
+            if (d) { iso++; time = time || d.time; } else break;
           }
           c.isoText = nonNull > 0 && iso === nonNull;
           if (c.isoText) {

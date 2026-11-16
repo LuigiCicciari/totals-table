@@ -33,11 +33,14 @@
     switch (cell.kind) {
       case 'num': return String(roundAsShown(cell.v, col.spec));
       case 'date': return isoFromMs(cell.v, cell.time);
-      case 'text': return cleanText(cell.v);
-      case 'link': return cleanText(cell.csv != null ? cell.csv : cell.v);
+      case 'text': return noFormula(cleanText(cell.v));
+      case 'link': return noFormula(cleanText(cell.csv != null ? cell.csv : cell.v));
       default: return '';
     }
   }
+
+  // Text starting with = + - @ would run as a formula when the CSV is opened in Excel; a leading apostrophe stops that.
+  function noFormula(s) { return /^[=+\-@\t\r]/.test(s) ? "'" + s : s; }
 
   function csvEscape(s) { return /[",\r\n]/.test(s) || /^\s|\s$/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
 
@@ -56,7 +59,8 @@
 
   function sheetName(s) {
     const t = String(s || 'Data').replace(/[\\\/\?\*\[\]:]/g, ' ').replace(/\s+/g, ' ').trim().replace(/^'+|'+$/g, '');
-    return (t || 'Data').slice(0, 31);
+    // "History" is reserved by Excel.
+    return (t && t.toLowerCase() !== 'history' ? t : t ? t + ' data' : 'Data').slice(0, 31);
   }
 
   async function buildXlsx(snap, ExcelJS) {
@@ -108,8 +112,12 @@
     // Conditional formatting: fills and font colors are copied as static colors; symbols go into the number
     // format, so the cell is still a real number that sums and sorts in Excel.
     const argb = hex => 'FF' + hex.replace('#', '').toUpperCase();
-    const withSymbol = (fmt, sym) => (fmt || 'General').split(';')
-      .map(sec => sec.startsWith('"') ? '"' + sym + ' ' + sec.slice(1) : '"' + sym + ' "' + sec).join(';');
+    // The symbol goes after any [Red]-style color code, which Excel requires to come first in a section.
+    const withSymbol = (fmt, sym) => (fmt || 'General').split(';').map(sec => {
+      const lead = (sec.match(/^(\[[^\]]*\])*/) || [''])[0];
+      const rest = sec.slice(lead.length);
+      return lead + (rest.startsWith('"') ? '"' + sym + ' ' + rest.slice(1) : '"' + sym + ' "' + rest);
+    }).join(';');
     const applyFormat = (row, values, isTotal) => {
       if (!snap.format) return;
       cols.forEach((c, k) => {
@@ -127,7 +135,10 @@
 
     // Subtotal rows sit above their detail rows, which are grouped with Excel's outline (+/- in the margin).
     const outline = snap.includeSubtotals && snap.rows.some(r => r.type === 'group');
-    if (outline) ws.properties.outlineProperties = { summaryBelow: false, summaryRight: false };
+    if (outline) {
+      ws.properties.outlineProperties = { summaryBelow: false, summaryRight: false };
+      ws.properties.outlineLevelRow = Math.max(...snap.rows.map(r => r.level || 0));
+    }
 
     // Group headers: one merged, centered cell over each run of member columns, as on screen.
     if (groups.length) {
@@ -164,13 +175,13 @@
       }
     }
     const lastData = ws.rowCount;
-    // Column alignment overrides, below the (centered) group header row.
+    if (bottom) { const tv = totalsValues(snap.totals, 'Total'); const tr = ws.addRow(tv); styleRow(tr, 'totals'); applyFormat(tr, tv, true); }
+    // Column alignment overrides, below the (centered) group header row, including a bottom totals row.
     cols.forEach((c, k) => {
       if (!c.align) return;
       const horizontal = { l: 'left', c: 'center', r: 'right' }[c.align];
       ws.getColumn(k + 1).eachCell((cell, rowNo) => { if (rowNo >= headRow) cell.alignment = Object.assign({}, cell.alignment, { horizontal }); });
     });
-    if (bottom) { const tv = totalsValues(snap.totals, 'Total'); const tr = ws.addRow(tv); styleRow(tr, 'totals'); applyFormat(tr, tv, true); }
     // Data bars use Excel's own data bars over the data rows, so they stay live if values change in Excel.
     for (const b of snap.barColumns || []) {
       const k = cols.findIndex(c => c.key === b.key);

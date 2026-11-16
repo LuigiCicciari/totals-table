@@ -27,7 +27,10 @@
     $('allowViewerLayout').checked = cfg.allowViewerLayout;
     $('totalsShow').checked = cfg.totals.show;
     $('totalsLocation').value = cfg.totals.location;
-    $('freeze').value = String(cfg.layout.freeze);
+    // "Freeze up to here" can freeze more columns than the list offers; add that choice so Save keeps it.
+    const fz = String(cfg.layout.freeze);
+    if (!Array.from($('freeze').options).some(o => o.value === fz)) $('freeze').add(new Option('First ' + fz + ' columns', fz));
+    $('freeze').value = fz;
     $('autoHideNone').checked = cfg.autoHideNone;
     $('nullString').value = cfg.nullText.string;
     $('nullNumber').value = cfg.nullText.number;

@@ -268,7 +268,25 @@
     }
 
     layoutKey() {
-      return 'tp-layout:' + this.ws.name + ':' + (this.dsSig ? 'ds' + hashStr(this.dsSig) : this.legacyHash());
+      return 'tp-layout:' + this.ws.name + ':' + (this.keyBase || (this.dsSig ? 'ds' + hashStr(this.dsSig) : this.legacyHash()));
+    }
+
+    // Different workbooks can share a sheet name and generic data source names ("Extract"), and all of them share
+    // this browser storage. Each slot remembers its field list; a table whose fields mostly differ from the slot's
+    // gets a slot of its own, so one workbook's layouts never show up in another. Small field changes keep the slot.
+    resolveKey() {
+      const fields = this.store.columns.filter(c => !c.virtual).map(c => c.key);
+      const legacy = this.legacyHash();
+      let base = this.dsSig ? 'ds' + hashStr(this.dsSig) : legacy;
+      if (this.dsSig) {
+        const metaKey = k => 'tp-fields:' + this.ws.name + ':' + k;
+        try {
+          const saved = JSON.parse(localStorage.getItem(metaKey(base)) || 'null');
+          if (Array.isArray(saved) && fieldOverlap(saved, fields) < 0.5) base += '-' + legacy;
+          localStorage.setItem(metaKey(base), JSON.stringify(fields));
+        } catch (e) { /* storage blocked */ }
+      }
+      this.keyBase = base;
     }
 
     legacyHash() { return hashStr(this.store ? this.store.columns.filter(c => !c.virtual).map(c => c.key).sort().join('|') : ''); }
@@ -286,9 +304,13 @@
     loadLocalLayout() {
       this.local = null;
       if (this.authoring || !this.cfg.allowViewerLayout) return;
+      this.resolveKey();
       this.migrateKey('tp-layout:');
       this.migrateKey('tp-presets:');
-      try { this.local = JSON.parse(localStorage.getItem(this.layoutKey()) || 'null'); } catch (e) { this.local = null; }
+      try {
+        const l = cleanLayout(JSON.parse(localStorage.getItem(this.layoutKey()) || 'null'));
+        this.local = Object.keys(l).length ? l : null;
+      } catch (e) { this.local = null; }
     }
 
     get layout() {
@@ -548,6 +570,15 @@
       return spans;
     }
 
+    // The full run of adjacent columns in the same group (a header split by the freeze line is one group).
+    groupRun(start, end) {
+      const cols = this.view.cols;
+      const g = this.groupOf(cols[start]);
+      while (start > 0 && this.groupOf(cols[start - 1]) === g) start--;
+      while (end < cols.length - 1 && this.groupOf(cols[end + 1]) === g) end++;
+      return { start, end };
+    }
+
     setGroups(change) {
       if (!this.authoring) return;
       const g = Object.assign({}, this.cfg.colGroups);
@@ -595,15 +626,15 @@
           else tests.push(i => fmt[i] != null && fmt[i].toLowerCase().indexOf(q) >= 0);
         }
         if (f.keep || f.exclude) {
-          const fmt = st.fmt[c.key];
-          const v = i => fmt[i] == null ? NUL : fmt[i];
+          const fmt = st.fmt[c.key], raw = st.raw[c.key];
+          const v = c.isNum ? i => (raw[i] === raw[i] && raw[i] != null ? raw[i] : NUL) : i => fmt[i] == null ? NUL : fmt[i];
           if (f.keep) { const s = new Set(f.keep); tests.push(i => s.has(v(i))); }
           if (f.exclude) { const s = new Set(f.exclude); tests.push(i => !s.has(v(i))); }
         }
       }
       if (this.search) {
         const q = this.search.toLowerCase();
-        const fmts = cols.map(c => st.fmt[c.key]);
+        const fmts = cols.filter(c => !c.virtual).map(c => st.fmt[c.key]);
         tests.push(i => fmts.some(f => f[i] != null && f[i].toLowerCase().indexOf(q) >= 0));
       }
       const idx = [];
@@ -642,7 +673,7 @@
     sortRows(idx, sorts, cols) {
       const keys = sorts.map(s => {
         const c = this.colDef(s.key);
-        return c && Object.assign(this.sortKeyArray(c), { dir: s.dir === 'desc' ? -1 : 1 });
+        return c && c.vkind !== 'run' && Object.assign(this.sortKeyArray(c), { dir: s.dir === 'desc' ? -1 : 1 });
       }).filter(Boolean);
       if (!keys.length) return this.defaultSort(idx, cols);
       idx.sort((a, b) => {
@@ -705,15 +736,17 @@
       const sorts = this.sortList();
       const firstNum = sorts.map(s => cols.find(c => c.key === s.key)).find(c => c && c.isNum);
       const numDir = firstNum && sorts.find(s => s.key === firstNum.key).dir === 'desc' ? -1 : 1;
-      const byLabel = (a, b) => collator.compare(a.label, b.label);
+      // Date columns order their groups by date, not by the text of the date.
+      const byLabel = (a, b) => a.sv != null && b.sv != null ? a.sv - b.sv : collator.compare(a.label, b.label);
       const build = (rows, level, prefix) => {
         const gc = gcs[level];
         const fmt = this.store.fmt[gc.key];
+        const dateArr = gc.isDate ? this.store.raw[gc.key] : this.store.dates[gc.key] || null;
         const map = new Map();
         for (const i of rows) {
           const k = fmt[i] == null ? '\u0000null' : fmt[i];
           let g = map.get(k);
-          if (!g) map.set(k, g = { type: 'group', key: prefix + k, label: fmt[i] == null ? this.nullFor(gc) : fmt[i], rows: [], level, colKey: gc.key });
+          if (!g) map.set(k, g = { type: 'group', key: prefix + k, label: fmt[i] == null ? this.nullFor(gc) : fmt[i], rows: [], level, colKey: gc.key, sv: dateArr ? dateArr[i] : null });
           g.rows.push(i);
         }
         const list = Array.from(map.values());
@@ -771,7 +804,7 @@
           <span class="tp-status" role="status" aria-live="polite"></span>
           <span class="tp-vfs"></span>
           <span class="tp-spacer"></span>
-          <button class="tp-chip" type="button" hidden title="Your column changes are saved in this browser only">Custom layout · Reset</button>
+          <button class="tp-chip tp-lchip" type="button" hidden title="Your column changes are saved in this browser only">Custom layout · Reset</button>
           <button class="tp-icon tp-lay" type="button" title="Layouts" aria-label="Layouts" hidden>${ICONS.lay}</button>
           <button class="tp-icon tp-cols" type="button" title="Show and hide columns" aria-label="Show and hide columns">${ICONS.cols}</button>
           <button class="tp-icon tp-dl" type="button" title="Download" aria-label="Download">${ICONS.dl}</button>
@@ -802,7 +835,7 @@
       this.scroller.addEventListener('scroll', () => { if (!this.raf) this.raf = requestAnimationFrame(() => { this.raf = 0; this.renderBody(false); }); });
       window.addEventListener('resize', () => this.refresh());
       this.searchEl.addEventListener('input', () => { clearTimeout(this.searchT); this.searchT = setTimeout(() => { this.search = this.searchEl.value.trim(); this.refresh(); }, 150); });
-      q('.tp-chip').addEventListener('click', e => { if (e.currentTarget.dataset.mode === 'menu') this.openPresets(e.currentTarget); else this.resetLocal(); });
+      q('.tp-lchip').addEventListener('click', e => { if (e.currentTarget.dataset.mode === 'menu') this.openPresets(e.currentTarget); else this.resetLocal(); });
       q('.tp-lay').addEventListener('click', e => this.openPresets(e.currentTarget));
       q('.tp-vfs').addEventListener('click', e => { const b = e.target.closest('button[data-k]'); if (b) this.clearValueFilter(b.dataset.k); });
       q('.tp-cols').addEventListener('click', e => this.openColumnsPicker(e.currentTarget));
@@ -845,7 +878,7 @@
         for (const c of this.view.cols) {
           const f = this.filters[c.key];
           if (!f || !(f.keep || f.exclude)) continue;
-          const name = v => v === NUL ? this.nullFor(c) : v;
+          const name = v => this.valueText(c, v);
           const list = (f.keep || f.exclude).map(name);
           const text = c.label + (f.keep ? ': only ' : ': not ') + (list.length > 2 ? list.slice(0, 2).join(', ') + ' +' + (list.length - 2) : list.join(', '));
           chips.push(`<button type="button" class="tp-chip tp-vchip" data-k="${esc(c.key)}" title="${esc(c.label + (f.keep ? ' kept: ' : ' excluded: ') + list.join(', ') + '\nClick to remove this filter')}">${esc(text.length > 48 ? text.slice(0, 47) + '…' : text)} ✕</button>`);
@@ -858,7 +891,7 @@
       this.searchEl.hidden = !this.cfg.showSearch;
       q('.tp-gear').hidden = !this.authoring;
       q('.tp-cols').hidden = !this.canEditLayout();
-      const chip = q('.tp-chip');
+      const chip = q('.tp-lchip');
       const act = this.presets && this.activePreset();
       q('.tp-lay').hidden = this.authoring || !this.cfg.allowViewerLayout || !this.presets;
       if (act && !this.authoring) {
@@ -995,7 +1028,7 @@
       const { cols, totals } = this.view;
       this.grid.style.setProperty('--cols', this.template());
       this.grid.style.width = cols.reduce((s, c) => s + c.w, 0) + 'px';
-      const sorts = this.sortList();
+      const sorts = this.sortList().filter(s => cols.some(c => c.key === s.key));
       const canEdit = this.canEditLayout();
       let h = '';
       if (this.view.spans) {
@@ -1139,6 +1172,7 @@
         const cell = e.target.closest('.tp-h');
         if (!cell) return;
         const c = this.view.cols[+cell.dataset.i];
+        if (c.vkind === 'run') return this.flash('Running totals follow the row order, so they can\'t be sorted.');
         const sorts = this.sortList();
         const def = c.isNum ? 'desc' : 'asc', alt = c.isNum ? 'asc' : 'desc';
         // Shift-click adds the column as the next sort, flips it, then takes it out again.
@@ -1178,7 +1212,7 @@
         if (e.target.closest('.tp-fzh')) return this.startFreezeDrag(e);
         if (e.target.closest('.tp-hm,input')) return;
         const grp = e.target.closest('.tp-g.mv');
-        if (grp) return this.startColumnDrag(e, +grp.dataset.s, +grp.dataset.e);
+        if (grp) { const r = this.groupRun(+grp.dataset.s, +grp.dataset.e); return this.startColumnDrag(e, r.start, r.end); }
         const cell = e.target.closest('.tp-h');
         if (cell && this.canEditLayout()) this.startColumnDrag(e, +cell.dataset.i);
       });
@@ -1316,7 +1350,7 @@
       const up = () => {
         window.removeEventListener('mousemove', move);
         window.removeEventListener('mouseup', up);
-        this.updateLayout({ widths: Object.assign({}, this.layout.widths, { [c.key]: c.w }) });
+        if (c.w !== w0) this.updateLayout({ widths: Object.assign({}, this.layout.widths, { [c.key]: c.w }) });
       };
       window.addEventListener('mousemove', move);
       window.addEventListener('mouseup', up);
@@ -1329,6 +1363,7 @@
       const bounds = [0];
       this.view.cols.forEach(c => bounds.push(bounds[bounds.length - 1] + c.w));
       let n = this.view.nFrozen;
+      const n0 = n;
       const guide = document.createElement('div');
       guide.className = 'tp-guide';
       guide.style.left = bounds[n] + 'px';
@@ -1344,7 +1379,7 @@
         window.removeEventListener('mousemove', move);
         window.removeEventListener('mouseup', up);
         guide.remove();
-        this.updateLayout({ freeze: n });
+        if (n !== n0) this.updateLayout({ freeze: n });
       };
       window.addEventListener('mousemove', move);
       window.addEventListener('mouseup', up);
@@ -1404,7 +1439,7 @@
         const x = e.clientX, y = e.clientY;
         const pick = this.pickedValues();
         const short = s => s.length > 30 ? s.slice(0, 29) + '…' : s;
-        const shown = pick && (pick.values.length === 1 ? '"' + short(pick.values[0] === NUL ? this.nullFor(pick.col) : pick.values[0]) + '"' : pick.values.length + ' values');
+        const shown = pick && (pick.values.length === 1 ? '"' + short(this.valueText(pick.col, pick.values[0])) + '"' : pick.values.length + ' values');
         const html = '<div class="tp-menu" role="menu">' +
           (pick ? `<button type="button" data-v="keep">Keep only ${esc(shown)}</button><button type="button" data-v="exclude">Exclude ${esc(shown)}</button><hr>` : '') +
           `<button type="button" data-m="cells">${what}</button>` +
@@ -1438,10 +1473,13 @@
         let i = d;
         if (typeof d === 'object') { if (d.colKey !== col.key) continue; i = d.rows[0]; }
         if (typeof i !== 'number') continue;
-        vals.add(fmt[i] == null ? NUL : fmt[i]);
+        if (col.isNum) { const v = this.store.raw[col.key][i]; vals.add(v === v && v != null ? v : NUL); }
+        else vals.add(fmt[i] == null ? NUL : fmt[i]);
       }
       return vals.size ? { col, values: Array.from(vals) } : null;
     }
+
+    valueText(c, v) { return v === NUL ? this.nullFor(c) : typeof v === 'number' ? R.formatNumber(v, c.spec) : String(v); }
 
     // Table-only filters, like the filter row: they last for this session and never change Tableau's filters.
     valueFilter(pick, mode) {
@@ -1592,7 +1630,10 @@
       if (this.authoring || !this.cfg.allowViewerLayout) return;
       try {
         const p = JSON.parse(localStorage.getItem(this.presetKey()) || 'null');
-        if (p && Array.isArray(p.list)) this.presets = { list: p.list, active: p.active || null };
+        if (p && Array.isArray(p.list)) {
+          const list = p.list.filter(x => x && typeof x.name === 'string' && x.name.trim()).map(x => ({ name: x.name, layout: cleanLayout(x.layout), savedAt: x.savedAt }));
+          this.presets = { list, active: list.some(x => x.name === p.active) ? p.active : null };
+        }
       } catch (e) { /* keep empty */ }
     }
 
@@ -1657,7 +1698,7 @@
       let n = 0;
       for (const p of doc.layouts) {
         if (!p || typeof p.name !== 'string' || !p.name.trim() || typeof p.layout !== 'object') continue;
-        const entry = { name: p.name.trim().slice(0, 60), layout: p.layout || {}, savedAt: p.savedAt || new Date().toISOString() };
+        const entry = { name: p.name.trim().slice(0, 60), layout: cleanLayout(p.layout), savedAt: typeof p.savedAt === 'string' ? p.savedAt : new Date().toISOString() };
         const at = this.presets.list.findIndex(x => x.name === entry.name);
         if (at >= 0) this.presets.list[at] = entry; else this.presets.list.push(entry);
         n++;
@@ -1715,7 +1756,7 @@
           if (a === 'rename-ok') {
             const name = input.value.trim().slice(0, 60);
             if (!name || !act) return;
-            this.presets.list = L.filter(x => x === act || x.name !== name);
+            if (L.some(x => x !== act && x.name === name)) return this.flash('There is already a layout named "' + name + '". Pick another name.');
             act.name = name;
             this.presets.active = name;
             this.savePresets();
@@ -1769,13 +1810,14 @@
       const sorts = this.sortList();
       const inSort = sorts.some(s => s.key === c.key);
       const others = sorts.some(s => s.key !== c.key);
+      const canSort = c.vkind !== 'run';
       const items = [
-        ['sort-asc', 'Sort ' + words[0]], ['sort-desc', 'Sort ' + words[1]],
-        others ? ['then-asc', 'Then sort ' + words[0]] : null, others ? ['then-desc', 'Then sort ' + words[1]] : null,
+        canSort ? ['sort-asc', 'Sort ' + words[0]] : null, canSort ? ['sort-desc', 'Sort ' + words[1]] : null,
+        canSort && others ? ['then-asc', 'Then sort ' + words[0]] : null, canSort && others ? ['then-desc', 'Then sort ' + words[1]] : null,
         inSort && sorts.length > 1 ? ['sort-remove', 'Remove from sort'] : null,
         sorts.length ? ['sort-clear', sorts.length > 1 ? 'Clear all sorting' : 'Clear sort'] : null
       ];
-      const gk = this.groupKeys();
+      const gk = this.groupKeys().filter(k => this.view.cols.some(x => x.key === k));
       const gl = gk.indexOf(c.key);
       if (edit) {
         items.push('-',
@@ -1824,6 +1866,10 @@
         if (!b) return;
         this.closePop();
         if (b.dataset.a === 'stats') return this.openStats(i, anchor);
+        if (b.dataset.a === 'rename') {
+          return this.askName(anchor, 'Column name', c.label, name => this.updateLayout({ labels: Object.assign({}, this.layout.labels, { [c.key]: name }) }));
+        }
+        if (b.dataset.a === 'g-new') return this.askName(anchor, 'Group name (shown above this column)', '', name => this.setGroups(g => { g[c.key] = name; }));
         if (b.dataset.a === 'compare') return this.openCompare(i, anchor);
         this.menuAction(b.dataset.a, i, c);
       }));
@@ -1837,6 +1883,7 @@
       const idx = this.view.idx;
       const n = idx.length;
       const lines = [['Rows', n === st.n ? n.toLocaleString() : n.toLocaleString() + ' of ' + st.n.toLocaleString() + ' (filtered)']];
+      if (!st.complete) lines.push(['Note', 'Still loading rows, so these numbers will change']);
       const textCols = this.view.cols.filter(x => !x.isNum && x !== c).slice(0, 2);
       const rowName = i => { const s = textCols.map(x => st.fmt[x.key][i]).filter(v => v != null).join(' · '); return s ? ', ' + s : ''; };
       const count = k => k.toLocaleString();
@@ -1952,7 +1999,7 @@
         case 'hide': return this.updateLayout({ hidden: (lay.hidden || []).concat(c.key) });
         case 'freeze': return this.updateLayout({ freeze: i + 1 });
         case 'unfreeze': return this.updateLayout({ freeze: 0 });
-        case 'group': return this.updateLayout({ groupBy: this.groupKeys().concat(c.key).slice(0, MAX_LEVELS) });
+        case 'group': return this.updateLayout({ groupBy: this.groupKeys().filter(k => cols.some(x => x.key === k)).concat(c.key).slice(0, MAX_LEVELS) });
         case 'ungroup': { const g = this.groupKeys().filter(k => k !== c.key); return this.updateLayout({ groupBy: g.length ? g : null }); }
         // Collapse all on a level shows that level's subtotals (opening the levels above it);
         // Expand all opens that level and everything above it.
@@ -1969,11 +2016,6 @@
           this.renderBody(true);
           return;
         }
-        case 'rename': {
-          const name = window.prompt('Column name', c.label);
-          if (name == null) return;
-          return this.updateLayout({ labels: Object.assign({}, lay.labels, { [c.key]: name.trim() }) });
-        }
         case 'unrename': {
           const labels = Object.assign({}, lay.labels);
           delete labels[c.key];
@@ -1986,11 +2028,6 @@
         case 'format': return this.openFormat();
         case 'cf-hide': return this.updateLayout({ cfOff: (lay.cfOff || []).concat(c.key) });
         case 'cf-show': return this.updateLayout({ cfOff: (lay.cfOff || []).filter(k => k !== c.key) });
-        case 'g-new': {
-          const name = window.prompt('Group name (shown above this column)', '');
-          if (!name || !name.trim()) return;
-          return this.setGroups(g => { g[c.key] = name.trim(); });
-        }
         case 'g-out': return this.setGroups(g => { delete g[c.key]; });
         case 'rank-desc':
         case 'rank-asc':
@@ -2011,9 +2048,29 @@
       }
     }
 
+    // A name box inside the menu; browser pop-up prompts are often blocked inside Tableau.
+    askName(anchor, title, initial, onOk) {
+      const html = `<div class="tp-menu tp-ask"><div class="tp-ph">${esc(title)}</div><div class="tp-lname">` +
+        `<input type="text" maxlength="80" value="${esc(initial || '')}" aria-label="${esc(title)}"><button type="button" data-a="ok">OK</button></div></div>`;
+      this.openPop(anchor, html, pop => {
+        const input = pop.querySelector('input');
+        const done = () => { const v = input.value.trim(); this.closePop(); if (v) onOk(v); };
+        input.focus();
+        input.select();
+        input.addEventListener('keydown', e => {
+          if (e.key === 'Enter') { e.preventDefault(); done(); }
+          else if (e.key === 'Escape') { e.preventDefault(); this.closePop(); }
+        });
+        pop.querySelector('button[data-a="ok"]').addEventListener('click', done);
+      });
+    }
+
     openGroupMenu(start, anchor) {
-      const s = (this.view.spans || []).find(x => x.start === start);
-      if (!s || !s.label) return;
+      const sp = (this.view.spans || []).find(x => x.start === start);
+      if (!sp || !sp.label) return;
+      // Moves act on the whole group, even where the freeze line splits its header.
+      const run = this.groupRun(sp.start, sp.end);
+      const s = { label: sp.label, frozen: sp.frozen, start: run.start, end: run.end };
       const items = [];
       const n = this.view.cols.length;
       const okGap = g => this.dropOk(g, s.start, s.end);
@@ -2044,9 +2101,7 @@
         if (a === 'hide') return this.updateLayout({ hideGroups: true });
         if (a === 'remove') return this.setGroups(g => { Object.keys(g).forEach(k => { if (g[k] === s.label) delete g[k]; }); });
         if (a === 'rename') {
-          const name = window.prompt('Group name', s.label);
-          if (!name || !name.trim()) return;
-          return this.setGroups(g => { Object.keys(g).forEach(k => { if (g[k] === s.label) g[k] = name.trim(); }); });
+          return this.askName(anchor, 'Group name', s.label, name => this.setGroups(g => { Object.keys(g).forEach(k => { if (g[k] === s.label) g[k] = name; }); }));
         }
       }));
     }
@@ -2149,7 +2204,12 @@
         includeSubtotals: this.cfg.export.subtotals,
         totalsLocation: this.cfg.totals.location,
         frozenCols: nFrozen,
-        groupHeaders: this.view.spans ? this.view.spans.filter(s => s.label).map(s => ({ label: s.label, start: s.start, end: s.end })) : null,
+        groupHeaders: this.view.spans ? this.view.spans.reduce((out, s) => {
+          const last = out[out.length - 1];
+          if (last && last.label === s.label && last.end + 1 === s.start) last.end = s.end;
+          else out.push({ label: s.label, start: s.start, end: s.end });
+          return out;
+        }, []).filter(s => s.label) : null,
         format: (sc, v, isTotal) => this.cellFormat(this.colDef(sc.key), v, isTotal),
         barColumns: cols.filter(c => c.isNum && this.cfg.cf[c.key] && this.cfg.cf[c.key].type === 'bars').map(c => ({ key: c.key, totals: !!this.cfg.cf[c.key].totals }))
       };
@@ -2178,6 +2238,49 @@
         this.flash('Download failed: ' + ((e && e.message) || e));
       }
     }
+  }
+
+  function fieldOverlap(a, b) {
+    const s = new Set(a);
+    const shared = b.filter(k => s.has(k)).length;
+    return shared / Math.max(a.length, b.length, 1);
+  }
+
+  // Keeps only well-formed layout settings, so a damaged or hand-edited layout can't break the table.
+  function cleanLayout(l) {
+    if (!l || typeof l !== 'object' || Array.isArray(l)) return {};
+    const out = {};
+    const strs = v => Array.isArray(v) ? v.filter(x => typeof x === 'string') : null;
+    const map = (v, ok) => {
+      if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+      const o = {};
+      for (const k of Object.keys(v)) if (ok(v[k])) o[k] = v[k];
+      return o;
+    };
+    for (const k of ['order', 'hidden', 'pct', 'cfOff']) if (k in l) { const v = strs(l[k]); if (v) out[k] = v; }
+    if ('widths' in l) { const v = map(l.widths, x => typeof x === 'number' && isFinite(x) && x > 0 && x < 5000); if (v) out.widths = v; }
+    if ('labels' in l) { const v = map(l.labels, x => typeof x === 'string'); if (v) out.labels = v; }
+    if (l.freeze === 'auto') out.freeze = 'auto';
+    else if (typeof l.freeze === 'number' && isFinite(l.freeze) && l.freeze >= 0) out.freeze = Math.floor(l.freeze);
+    const okSort = x => x && typeof x.key === 'string' && (x.dir === 'asc' || x.dir === 'desc');
+    if ('sort' in l) {
+      if (l.sort === null) out.sort = null;
+      else if (Array.isArray(l.sort)) out.sort = l.sort.filter(okSort).map(x => ({ key: x.key, dir: x.dir }));
+      else if (okSort(l.sort)) out.sort = [{ key: l.sort.key, dir: l.sort.dir }];
+    }
+    if ('groupBy' in l) {
+      if (l.groupBy === null) out.groupBy = null;
+      else if (typeof l.groupBy === 'string') out.groupBy = [l.groupBy];
+      else { const v = strs(l.groupBy); if (v) out.groupBy = v.slice(0, MAX_LEVELS); }
+    }
+    if (Array.isArray(l.calc)) {
+      out.calc = l.calc.filter(d => d && typeof d.src === 'string' && (
+        (d.kind === 'rank' && (d.dir === undefined || d.dir === 'asc' || d.dir === 'desc')) || d.kind === 'run' ||
+        ((d.kind === 'diff' || d.kind === 'pdiff') && typeof d.other === 'string')
+      )).map(d => { const o = { kind: d.kind, src: d.src }; if (d.dir) o.dir = d.dir; if (d.other) o.other = d.other; return o; });
+    }
+    if ('hideGroups' in l) out.hideGroups = !!l.hideGroups;
+    return out;
   }
 
   function hashStr(t) {
