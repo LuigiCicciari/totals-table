@@ -9,11 +9,8 @@
   const FREEZE_MAX = 0.6;
   const MAX_LEVELS = 3;
   const NUL = '\u0000null';
-  const VERSION = (() => {
-    const src = document.currentScript && document.currentScript.src;
-    const m = src && src.match(/[?&]v=(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})/);
-    return m ? m[1] + '-' + m[2] + '-' + m[3] + ' ' + m[4] + ':' + m[5] : 'development copy';
-  })();
+  // Semantic version (MAJOR.MINOR.PATCH); see CHANGELOG.md. The ?v= tags in the HTML are only for browser caches.
+  const VERSION = '1.0.0';
   const calcKey = d => d.kind === 'rank' ? '__rank:' + (d.dir || 'desc') + ':' + d.src : d.kind === 'run' ? '__run:' + d.src : '__' + d.kind + ':' + d.src + '|' + d.other;
 
   function defaults() {
@@ -911,7 +908,7 @@
         chip.title = 'Your column changes are saved in this browser only';
       }
       const t = this.timing;
-      q('.tp-info').title = 'Totals Table version ' + VERSION + (t ? '\n' : '') + (t ? 'Tableau query ' + (t.query / 1000).toFixed(2) + 's · all rows loaded ' + ((t.fetch || 0) / 1000).toFixed(2) + 's · last draw ' + Math.round(t.draw || 0) + ' ms' + (this.freezePaused ? '\nFreeze paused: frozen columns are wider than 60% of the table.' : '') : '');
+      q('.tp-info').title = 'Totals Table ' + VERSION + (t ? '\n' : '') + (t ? 'Tableau query ' + (t.query / 1000).toFixed(2) + 's · all rows loaded ' + ((t.fetch || 0) / 1000).toFixed(2) + 's · last draw ' + Math.round(t.draw || 0) + ' ms' + (this.freezePaused ? '\nFreeze paused: frozen columns are wider than 60% of the table.' : '') : '');
     }
 
     template() { return this.view.cols.map(c => c.w + 'px').join(' '); }

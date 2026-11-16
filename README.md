@@ -22,7 +22,7 @@ A fast table for Tableau worksheets, with correct totals for ratio columns, head
 - Right-click to copy cells, cells with headers, or the whole table (data rows only, in on-screen order). Tableau Desktop keeps Ctrl+C for itself, so right-click is the reliable way
 - Tableau tooltips on hover, mark selection on click (Ctrl/Cmd-click adds), so dashboard actions keep working
 - Only the rows on screen are drawn, so large tables scroll smoothly. Rows appear while the rest are still loading
-- The info icon shows the version Tableau is running (so you can tell when an update has reached Cloud) and load timing, split into Tableau query time and load/draw time
+- The info icon shows the version Tableau is running, such as 1.0.0 (so you can tell when an update has reached Cloud; see [CHANGELOG.md](CHANGELOG.md) for what changed in each version), and load timing, split into Tableau query time and load/draw time
 - Hovering a header shows its name, how it totals when that isn't a plain sum (for example "Profit ÷ Sales" for Profit Ratio, taken from the totals rules), and its sort. The column menu adds the total, any formatting rule and the original field name
 - When filters leave no rows, the table says so and offers Clear filters
 
@@ -103,6 +103,10 @@ On Tableau Cloud, a site admin must add the extension's address to the site's al
 ## Status
 
 Tested in Tableau Desktop and Tableau Cloud: loading and field carry-over, parameter headers, freezing, sorting, filters and search, column dragging, totals and subtotals, collapsing, % of total columns, links, conditional formatting, group headers, right-click copy, Excel and CSV downloads, viewer layouts, Tableau tooltips, and mark selection.
+
+## Versions
+
+Versions follow Semantic Versioning (MAJOR.MINOR.PATCH). [CHANGELOG.md](CHANGELOG.md) lists what changed in each one.
 
 ## Libraries
 
