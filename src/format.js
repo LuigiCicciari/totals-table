@@ -32,6 +32,8 @@
     if (!Array.from($('freeze').options).some(o => o.value === fz)) $('freeze').add(new Option('First ' + fz + ' columns', fz));
     $('freeze').value = fz;
     $('autoHideNone').checked = cfg.autoHideNone;
+    $('lastValues').value = cfg.lastRows.values || '';
+    $('lastAlways').checked = !!cfg.lastRows.always;
     $('nullString').value = cfg.nullText.string;
     $('nullNumber').value = cfg.nullText.number;
     $('nullDate').value = cfg.nullText.date;
@@ -53,6 +55,7 @@
     const fz = $('freeze').value;
     cfg.layout.freeze = fz === 'auto' ? 'auto' : Number(fz);
     cfg.autoHideNone = $('autoHideNone').checked;
+    cfg.lastRows = { values: $('lastValues').value.trim(), always: $('lastAlways').checked };
     cfg.nullText = { string: $('nullString').value, number: $('nullNumber').value, date: $('nullDate').value };
     const f = document.querySelector('input[name="formats"]:checked');
     cfg.export = {

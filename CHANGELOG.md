@@ -2,6 +2,11 @@
 
 All notable changes to Totals Table. Versions follow [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH, where a patch fixes bugs, a minor version adds features without breaking anything, and a major version changes something existing (read its notes before updating). The version in use shows when hovering the info icon in the table's toolbar.
 
+## 1.1.0 (2026-11-16)
+
+**Added**
+- Values shown last: in Format → Display, list catch-all values such as "Other, Unknown". In the default order they sort after everything else in their column, in any text column: a Region called "Unknown" comes last, and a city recorded as "Texas Other" comes last among the Texas cities. With subtotals, matching groups come last at their level. Values match as whole words, ignoring case ("Other" doesn't match "Mother"). Once someone sorts, they sort like every other row, unless "Keep them last even when the table is sorted" is ticked. Off until set.
+
 ## 1.0.0 (2026-11-16)
 
 First release.

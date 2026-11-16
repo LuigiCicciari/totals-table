@@ -7,6 +7,7 @@ A fast table for Tableau worksheets, with correct totals for ratio columns, head
 **Table**
 - Columns: drag to reorder, move first/left/right/last, hide, show/hide picker, resize, rename/reset name
 - Rows load A to Z by the text columns on the left, like a crosstab. Click a header to sort (text A to Z first, numbers largest first). Shift-click more headers, or use Then sort in a column's menu, to sort by several columns; headers show the sort order as small numbers. Viewers can always sort
+- Optional values shown last (Format → Display): catch-all values like "Other" or "Unknown" sort after everything else in their column, in any text column. A Region called "Unknown" comes last, and a city recorded as "Texas Other" comes last among the Texas cities. Matching is by whole word, ignoring case, so "Other" doesn't match "Mother". Sorting then treats them like any other row, unless the author ticks "Keep them last even when the table is sorted"
 - Optional filter row under the headers (text: contains, starts with or exact; numbers: min/max) and optional search box, both turned on in Format → Display
 - Frozen header and totals row. Parameter-driven columns are frozen by default; drag the freeze line or use "Freeze up to here"
 - Optional subtotals by any text column, up to three levels deep (for example Region, then State, then City): use Subtotal by this column, then Add subtotal level on the next column. Every level uses the totals rules, so ratio subtotals stay correct. Click a group row to collapse it. Collapse all in a level's column menu shows that level's subtotals, and Expand all opens it again. Sorting a number column orders the groups at every level by their subtotal and the rows within each group; sorting a subtotalled column orders that level by name
@@ -62,7 +63,7 @@ A fast table for Tableau worksheets, with correct totals for ratio columns, head
 
 **Viewer layouts**
 - When "Let viewers move, hide, resize and freeze columns" is on, a viewer's changes (column order, hidden columns, widths, names, freeze, sort, subtotals, % of total columns, hidden formatting and hidden group headers) are saved in their own browser only. A "Custom layout · Reset" chip appears so they can return to the published layout
-- Saved layouts: viewers can save named layouts (for example "Weekly review" or "Top stations") from the Layouts button and switch between them, update or undo changes to one, rename or delete it, or go back to the published layout. The chip shows which layout is active and whether it has been edited
+- Saved layouts: viewers can save named layouts (for example "Weekly review" or "Top regions") from the Layouts button and switch between them, update or undo changes to one, rename or delete it, or go back to the published layout. The chip shows which layout is active and whether it has been edited
 - Layouts live in the viewer's browser only, and the Layouts menu says so plainly: private windows, other computers and clearing cookies and site data won't have them. Export layouts saves them all to a small file that Import brings back on any browser or computer, or shares with a teammate. The first save shows a one-time tip about exporting, and if a browser blocks saving, the menu explains that too
 
 ## Totals rules

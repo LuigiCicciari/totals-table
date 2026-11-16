@@ -10,7 +10,7 @@
   const MAX_LEVELS = 3;
   const NUL = '\u0000null';
   // Semantic version (MAJOR.MINOR.PATCH); see CHANGELOG.md. The ?v= tags in the HTML are only for browser caches.
-  const VERSION = '1.0.0';
+  const VERSION = '1.1.0';
   const calcKey = d => d.kind === 'rank' ? '__rank:' + (d.dir || 'desc') + ':' + d.src : d.kind === 'run' ? '__run:' + d.src : '__' + d.kind + ':' + d.src + '|' + d.other;
 
   function defaults() {
@@ -29,6 +29,8 @@
       totalOverrides: {},
       rules: null,
       export: { formats: 'excel', excelTotals: true, subtotals: true, filename: '{sheet} {date}' },
+      // Catch-all values such as "Other" that sort after everything else in their column in the default order.
+      lastRows: { values: '', always: false },
       links: {},
       cf: {},
       colGroups: {},
@@ -46,6 +48,7 @@
     out.nullText = Object.assign(defaults().nullText, saved.nullText);
     out.totals = Object.assign(defaults().totals, saved.totals);
     out.export = Object.assign(defaults().export, saved.export);
+    out.lastRows = Object.assign(defaults().lastRows, saved.lastRows);
     out.layout = Object.assign(defaults().layout, saved.layout);
     out.headerLinks = saved.headerLinks || {};
     out.totalOverrides = saved.totalOverrides || {};
@@ -657,10 +660,13 @@
     // With no sort chosen, order rows A to Z by the text columns on the left, like a crosstab.
     defaultSort(idx, cols) {
       const keys = [];
-      for (const c of cols) { if (c.isNum) break; keys.push(this.sortKeyArray(c)); }
+      for (const c of cols) { if (c.isNum) break; keys.push(Object.assign(this.sortKeyArray(c), { last: this.lastFlags(c) })); }
       if (!keys.length) return;
+      // "Shown last" values sort after the other values of their own column, so a city called "Texas Other"
+      // ends up last among the Texas cities rather than at the bottom of the table.
       idx.sort((a, b) => {
-        for (const { arr, num } of keys) {
+        for (const { arr, num, last } of keys) {
+          if (last && last[a] !== last[b]) return last[a] ? 1 : -1;
           const x = arr[a], y = arr[b];
           const xn = x == null || x !== x, yn = y == null || y !== y;
           if (xn || yn) { if (xn !== yn) return xn ? 1 : -1; continue; }
@@ -671,6 +677,31 @@
       });
     }
 
+    // A test for the "shown last" values as whole words, ignoring case: "Other" matches "Other" and
+    // "Texas Other" but not "Mother". Null when the setting is empty.
+    lastMatcher() {
+      const vals = String((this.cfg.lastRows && this.cfg.lastRows.values) || '').split(',').map(v => v.trim()).filter(Boolean);
+      if (!vals.length) return null;
+      const sig = vals.join('\u0001');
+      if (this.lastSig !== sig) {
+        const words = vals.map(v => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+        this.lastRe = new RegExp('(?:^|[^\\p{L}\\p{N}])(?:' + words + ')(?=$|[^\\p{L}\\p{N}])', 'iu');
+        this.lastSig = sig;
+      }
+      const re = this.lastRe;
+      return s => s != null && re.test(String(s));
+    }
+
+    // Per text column, which rows hold a "shown last" value (null for columns with none).
+    lastFlags(c) {
+      const isLast = this.lastMatcher();
+      if (!isLast || c.isNum || c.isDate) return null;
+      const fmt = this.store.fmt[c.key];
+      let any = false;
+      const flags = fmt.map(v => { const f = isLast(v); if (f) any = true; return f; });
+      return any ? flags : null;
+    }
+
     // Each sort breaks ties left by the one before it; empty values always go last.
     sortRows(idx, sorts, cols) {
       const keys = sorts.map(s => {
@@ -678,7 +709,15 @@
         return c && c.vkind !== 'run' && Object.assign(this.sortKeyArray(c), { dir: s.dir === 'desc' ? -1 : 1 });
       }).filter(Boolean);
       if (!keys.length) return this.defaultSort(idx, cols);
+      // When the author keeps them last even when sorted, rows holding a "shown last" value in any visible text
+      // column go after the rest, which are sorted as usual.
+      let lastRow = null;
+      if (this.cfg.lastRows.always) {
+        const flags = cols.map(c => this.lastFlags(c)).filter(Boolean);
+        if (flags.length) lastRow = i => flags.some(f => f[i]);
+      }
       idx.sort((a, b) => {
+        if (lastRow) { const la = lastRow(a), lb = lastRow(b); if (la !== lb) return la ? 1 : -1; }
         for (const { arr, num, dir } of keys) {
           const x = arr[a], y = arr[b];
           const xn = x == null || x !== x, yn = y == null || y !== y;
@@ -728,7 +767,7 @@
       return R.computeTotal(t, c.key, rows, k => this.store.raw[k]);
     }
 
-    // Builds up to three nested subtotal levels. Group keys are paths, so the same station under two markets
+    // Builds up to three nested subtotal levels. Group keys are paths, so the same city under two states
     // collapses separately.
     groupRows(cols, idx, keys) {
       const gcs = keys.map(k => cols.find(c => c.key === k)).filter(Boolean);
@@ -770,6 +809,13 @@
             return x === y ? byLabel(a, b) : (x < y ? -numDir : numDir);
           });
         } else list.sort(byLabel);
+        // Groups named like "Other" go after the others at their level (only in the default order unless
+        // the author keeps them last when sorted).
+        const isLast = this.lastMatcher();
+        if (isLast && (!sorts.length || this.cfg.lastRows.always)) {
+          const keep = list.filter(g => !isLast(g.label));
+          if (keep.length !== list.length) return keep.concat(list.filter(g => isLast(g.label)));
+        }
         return list;
       };
       this.groups = build(idx, 0, '');
