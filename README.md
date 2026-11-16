@@ -95,7 +95,7 @@ This example uses fields from Tableau's Superstore sample data, where `Orders` i
 
 ## Adding it to a worksheet
 
-Tableau adds a viz extension from a `.trex` manifest that points to where the extension is hosted. In a worksheet, open the Marks card type menu, choose **Add Extension** → **Access Local Viz Extensions**, and pick the `.trex`. Tableau copies the extension's address into the workbook, so the `.trex` is only needed when adding it.
+Tableau adds a viz extension from a `.trex` manifest that points to where the extension is hosted. Download [TotalsTable.trex](TotalsTable.trex) from this repository (it points to the hosted copy on GitHub Pages, so there is nothing to install). In a worksheet, open the Marks card type menu, choose **Add Extension** → **Access Local Viz Extensions**, and pick the `.trex`. Tableau copies the extension's address into the workbook, so the `.trex` is only needed when adding it.
 
 Drag fields onto **Detail** in the order you want the columns. Fields that are only on **Tooltip** are left out of the table. Use **Format Extension** on the Marks card, or the gear icon, to open the settings. Settings are saved in the workbook.
 

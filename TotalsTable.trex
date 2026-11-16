@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest manifest-version="0.1" xmlns="http://www.tableau.com/xml/extension_manifest">
+  <worksheet-extension id="io.totals-table.viz" extension-version="1.3.2">
+    <default-locale>en_US</default-locale>
+    <name resource-id="name"/>
+    <description>Fast data table with correct ratio totals, parameter-driven headers and clean Excel/CSV downloads</description>
+    <author name="Luigi Cicciari" email="tableau@cicciari.com" organization="Luigi Cicciari" website="https://github.com/LuigiCicciari/totals-table"/>
+    <min-api-version>1.11</min-api-version>
+    <source-location>
+      <url>https://luigicicciari.github.io/totals-table/index.html</url>
+    </source-location>
+    <icon>iVBORw0KGgoAAAANSUhEUgAAAEYAAABGCAYAAABxLuKEAAAAs0lEQVR42u3cwQmAMAwF0GziiA7uELqALWqD0OYFeuzlYeF7+Il4ONt+nCucGJ1VINKgqoC8AqqK0sWpjtLEgXIDA6SBAwMMmGEYEA0cCEkwsw4YMGDAgAEDBgwYMGDSYL7+f8x0FwwYMGDAgAGzJoyA54sBAwYMGDBgwAh4Ap6nBAYMGDBgwIAR8AQ8TwkMGDBgwICRY36BUcvRctNy04kEA0Zb324HG0HskLF5yM6qAhAXVNbjZ00q5u4AAAAASUVORK5CYII=</icon>
+  </worksheet-extension>
+  <resources>
+    <resource id="name">
+      <text locale="en_US">Totals Table</text>
+    </resource>
+  </resources>
+</manifest>
