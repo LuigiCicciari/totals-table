@@ -63,6 +63,8 @@ button, input, select { font: inherit; color: inherit; }
 .tp-h:hover .tp-hm, .tp-hm:focus-visible { opacity: 1; }
 .tp-rz { position: absolute; top: 0; right: -3px; width: 6px; height: 100%; cursor: col-resize; z-index: 2; }
 .tp-fzh { position: absolute; top: 0; right: -2px; width: 5px; height: 100%; cursor: ew-resize; z-index: 3; background: transparent; border-right: 2px solid var(--tp-line-strong); }
+/* On the last frozen column the freeze line owns the edge, so the resize grip sits just inside it. */
+.tp-h.fz-edge .tp-rz { right: 3px; width: 7px; }
 .tp-fzh.at-start { right: auto; left: 0; border-right: 0; border-left: 2px dashed var(--tp-line-strong); }
 .tp-fzh:hover { border-color: var(--tp-accent); }
 .tp-guide { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--tp-accent); z-index: 5; pointer-events: none; }

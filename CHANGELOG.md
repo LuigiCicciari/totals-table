@@ -2,6 +2,11 @@
 
 All notable changes to Totals Table. Versions follow [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH, where a patch fixes bugs, a minor version adds features without breaking anything, and a major version changes something existing (read its notes before updating). The version in use shows when hovering the info icon in the table's toolbar.
 
+## 1.3.4 (2026-11-16)
+
+**Fixed**
+- The last frozen column can be resized again. Its resize grip sat under the freeze line's handle; the freeze line now keeps the edge and the resize grip sits just inside it.
+
 ## 1.3.3 (2026-11-16)
 
 **Changed**
