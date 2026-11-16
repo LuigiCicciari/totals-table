@@ -2,6 +2,11 @@
 
 All notable changes to Totals Table. Versions follow [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH, where a patch fixes bugs, a minor version adds features without breaking anything, and a major version changes something existing (read its notes before updating). The version in use shows when hovering the info icon in the table's toolbar.
 
+## 1.3.1 (2026-11-16)
+
+**Changed**
+- Turning on Top or Bottom N now always sorts the table by that column, so the rows read as a ranking even when the table was sorted by another column. A different sort can still be chosen afterwards.
+
 ## 1.3.0 (2026-11-16)
 
 **Added**

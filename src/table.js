@@ -10,7 +10,7 @@
   const MAX_LEVELS = 3;
   const NUL = '\u0000null';
   // Semantic version (MAJOR.MINOR.PATCH); see CHANGELOG.md. The ?v= tags in the HTML are only for browser caches.
-  const VERSION = '1.3.0';
+  const VERSION = '1.3.1';
   const calcKey = d => d.kind === 'rank' ? '__rank:' + (d.dir || 'desc') + ':' + d.src : d.kind === 'run' ? '__run:' + d.src : '__' + d.kind + ':' + d.src + '|' + d.other;
 
   function defaults() {
@@ -2126,10 +2126,9 @@
         if (b.dataset.custom) { dir = b.dataset.custom; n = Math.floor(+pop.querySelector('input').value); }
         if (!dir || !(n >= 1)) return;
         this.closePop();
-        // With no sort chosen, the shown rows are also sorted by the same column, largest (or smallest) first.
-        const patch = { topN: { key: c.key, n: Math.min(n, 100000), dir } };
-        if (!this.sortList().length) patch.sort = [{ key: c.key, dir: dir === 'bottom' ? 'asc' : 'desc' }];
-        this.updateLayout(patch);
+        // Turning it on also sorts by the same column, largest (or smallest) first, so the rows read as a ranking.
+        // Any other sort can be chosen afterwards.
+        this.updateLayout({ topN: { key: c.key, n: Math.min(n, 100000), dir }, sort: [{ key: c.key, dir: dir === 'bottom' ? 'asc' : 'desc' }] });
       }));
     }
 
