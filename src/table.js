@@ -106,6 +106,7 @@
       ws.addEventListener(tableau.TableauEventType.SummaryDataChanged, () => this.reload());
       tableau.extensions.settings.addEventListener(tableau.TableauEventType.SettingsChanged, () => { this.loadConfig(); this.refresh(); });
       await this.loadParams();
+      await this.loadSourceNames();
       this.reload();
     }
 
@@ -256,16 +257,37 @@
 
     // ---------- layout ----------
 
+    // Viewer layouts belong to a worksheet and its data sources, so adding or removing a field on the sheet keeps
+    // them (missing fields are skipped, new ones show at the end). If the data source names can't be read, the
+    // older key based on the exact field list is used.
+    async loadSourceNames() {
+      try {
+        const ds = await this.ws.getDataSourcesAsync();
+        this.dsSig = ds.map(d => d.name).sort().join('|') || null;
+      } catch (e) { this.dsSig = null; }
+    }
+
     layoutKey() {
-      const keys = this.store ? this.store.columns.map(c => c.key).sort().join('|') : '';
-      let h = 0;
-      for (let i = 0; i < keys.length; i++) h = (h * 31 + keys.charCodeAt(i)) | 0;
-      return 'tp-layout:' + this.ws.name + ':' + (h >>> 0).toString(36);
+      return 'tp-layout:' + this.ws.name + ':' + (this.dsSig ? 'ds' + hashStr(this.dsSig) : this.legacyHash());
+    }
+
+    legacyHash() { return hashStr(this.store ? this.store.columns.filter(c => !c.virtual).map(c => c.key).sort().join('|') : ''); }
+
+    // Moves layouts saved under the older field-list key to the current key, once.
+    migrateKey(prefix) {
+      const key = this.layoutKey().replace('tp-layout:', prefix);
+      const old = prefix + this.ws.name + ':' + this.legacyHash();
+      if (key === old) return;
+      try {
+        if (localStorage.getItem(key) == null && localStorage.getItem(old) != null) localStorage.setItem(key, localStorage.getItem(old));
+      } catch (e) { /* storage blocked */ }
     }
 
     loadLocalLayout() {
       this.local = null;
       if (this.authoring || !this.cfg.allowViewerLayout) return;
+      this.migrateKey('tp-layout:');
+      this.migrateKey('tp-presets:');
       try { this.local = JSON.parse(localStorage.getItem(this.layoutKey()) || 'null'); } catch (e) { this.local = null; }
     }
 
@@ -2156,6 +2178,12 @@
         this.flash('Download failed: ' + ((e && e.message) || e));
       }
     }
+  }
+
+  function hashStr(t) {
+    let h = 0;
+    for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) | 0;
+    return (h >>> 0).toString(36);
   }
 
   function loadScript(src, ready) {
