@@ -10,7 +10,7 @@
   const MAX_LEVELS = 3;
   const NUL = '\u0000null';
   // Semantic version (MAJOR.MINOR.PATCH); see CHANGELOG.md. The ?v= tags in the HTML are only for browser caches.
-  const VERSION = '1.2.0';
+  const VERSION = '1.3.0';
   const calcKey = d => d.kind === 'rank' ? '__rank:' + (d.dir || 'desc') + ':' + d.src : d.kind === 'run' ? '__run:' + d.src : '__' + d.kind + ':' + d.src + '|' + d.other;
 
   function defaults() {
@@ -35,6 +35,8 @@
       cf: {},
       colGroups: {},
       colFormat: {},
+      // Per column: hide it while a parameter has one of these values, e.g. { param: 'Show Details', values: 'False' }.
+      hideWhen: {},
       // Whole-table look. The defaults are the original design, so nothing changes until an author sets something.
       style: { size: 'normal', density: 'normal', text: '#1f2328', headBg: '#f6f8fa', headText: '#1f2328', headBold: true, headWrap: false, lines: 'both', banding: true, totBg: '#fbfbfc', totBold: true, subBg: '#f3f5f8', subBold: true, neg: '', accent: '#1f6feb' },
       layout: { order: [], hidden: [], widths: {}, labels: {}, freeze: 'auto', sort: null, groupBy: null, pct: [], calc: [], cfOff: [], hideGroups: false, topN: null }
@@ -56,6 +58,7 @@
     out.cf = saved.cf || {};
     out.colGroups = saved.colGroups || {};
     out.colFormat = saved.colFormat || {};
+    out.hideWhen = saved.hideWhen || {};
     out.style = Object.assign(defaults().style, saved.style);
     return out;
   }
@@ -494,7 +497,18 @@
       return p ? p.value : col.name;
     }
 
+    // A column hides itself when its header parameter is set to "(none)", or when its "Hide when" rule matches the
+    // chosen parameter's current value. Table calculation columns follow the column they're based on.
     autoHidden(col) {
+      if (col.virtual) { const src = this.colDef(col.srcKey); return !!src && this.autoHidden(src); }
+      const rule = this.cfg.hideWhen && this.cfg.hideWhen[col.key];
+      if (rule && rule.param && rule.values) {
+        const p = this.params.find(x => x.name.toLowerCase() === String(rule.param).toLowerCase());
+        if (p) {
+          const cur = [String(p.value).trim().toLowerCase(), String(p.raw).trim().toLowerCase()];
+          if (String(rule.values).split(',').map(v => v.trim().toLowerCase()).filter(Boolean).some(v => cur.includes(v))) return true;
+        }
+      }
       if (!this.cfg.autoHideNone) return false;
       const p = this.paramFor(col);
       if (!p) return false;
@@ -2291,7 +2305,7 @@
       const html = '<div class="tp-menu tp-picker"><div class="tp-ph">Show and hide columns</div>' + keys.filter(k => this.authoring || !this.autoHidden(this.colDef(k))).map(k => {
         const c = this.colDef(k);
         const auto = this.autoHidden(c);
-        return `<label${auto ? ' class="muted" title="Hidden because its parameter is set to none"' : ''}><input type="checkbox" data-k="${esc(k)}"${!hidden.has(k) ? ' checked' : ''}${auto ? ' disabled' : ''}> ${esc(this.labelFor(c))}</label>`;
+        return `<label${auto ? ' class="muted" title="Hidden by a parameter setting"' : ''}><input type="checkbox" data-k="${esc(k)}"${!hidden.has(k) ? ' checked' : ''}${auto ? ' disabled' : ''}> ${esc(this.labelFor(c))}</label>`;
       }).join('') + (this.groupNames().length ? `<hr><label><input type="checkbox" data-g="1"${this.layout.hideGroups ? '' : ' checked'}> Show group headers</label>` : '') +
         '<hr><button type="button" data-a="all">Show all</button></div>';
       this.openPop(anchor, html, pop => {

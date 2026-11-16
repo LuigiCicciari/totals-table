@@ -51,6 +51,7 @@ A fast table for Tableau worksheets, with correct totals for ratio columns, head
 **Headers from parameters**
 - If a field and a parameter share a name (for example a calculated field "Column 1" driven by a parameter "Column 1"), the header shows the parameter's current value and updates live
 - A column whose parameter is set to "(none)" is hidden automatically
+- Hide when: any column can also hide itself while a chosen parameter has one of a list of values, for example a True/False parameter "Show Discount" set to False, or a list parameter "View" set to "Summary". Set it in Format → Columns & totals. It updates live, keeps the column out of viewers' show/hide list and downloads while hidden, and the column's % of total, rank or other calculation columns hide with it
 - Any column can be linked to a different parameter, or unlinked, in Format → Columns & totals
 
 **Downloads**

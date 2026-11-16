@@ -2,6 +2,11 @@
 
 All notable changes to Totals Table. Versions follow [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH, where a patch fixes bugs, a minor version adds features without breaking anything, and a major version changes something existing (read its notes before updating). The version in use shows when hovering the info icon in the table's toolbar.
 
+## 1.3.0 (2026-11-16)
+
+**Added**
+- Hide when: extends the existing "(none)" auto-hide to any parameter and value. In Format → Columns & totals, a column can hide itself while a chosen parameter has one of the listed values, for example a True/False parameter "Show Discount" set to False, or a list parameter "View" set to "Summary". The column comes back as soon as the parameter changes, stays out of viewers' show/hide list and out of downloads while hidden, and its table calculation columns (such as % of total) hide with it. Matching ignores capitalization; several values can be separated by commas. Off until set.
+
 ## 1.2.0 (2026-11-16)
 
 **Added**

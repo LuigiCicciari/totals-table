@@ -129,6 +129,7 @@
         </select></td>
         <td>${totalBlock}</td>
         <td>${linkCell(c, i)}</td>
+        <td>${hideWhenCell(c, i)}</td>
         <td><input type="checkbox" data-i="${i}" data-k="hidden"${hidden.has(c.key) ? ' checked' : ''} aria-label="Hide ${esc(c.name)} by default"></td>
       </tr>`;
     }).join('');
@@ -140,11 +141,27 @@
     $('groupList').innerHTML = names.map(n => `<option value="${esc(n)}"></option>`).join('');
   }
 
+  // Hide the column while a parameter has one of the listed values (for example a True/False switch set to False).
+  function hideWhenCell(c, i) {
+    if (!params.length) return '<span class="muted">No parameters</span>';
+    const r = cfg.hideWhen[c.key] || {};
+    return `<select data-i="${i}" data-k="hwParam" aria-label="Parameter that hides ${esc(c.name)}"><option value="">Never</option>${params.map(p => `<option value="${esc(p)}"${r.param === p ? ' selected' : ''}>${esc(p)}</option>`).join('')}</select>` +
+      (r.param ? `<label class="linktext">is <input type="text" data-i="${i}" data-k="hwValues" value="${esc(r.values || '')}" placeholder="e.g. False"></label><div class="hint">Separate several values with commas.</div>` : '');
+  }
+
   function onColumnChange(e) {
     const el = e.target;
     if (!el.dataset || el.dataset.i == null) return;
     const c = cols[+el.dataset.i];
     const k = el.dataset.k;
+    if (k === 'hwParam' || k === 'hwValues') {
+      const r = Object.assign({}, cfg.hideWhen[c.key]);
+      if (k === 'hwParam') { if (el.value) r.param = el.value; else { delete r.param; delete r.values; } }
+      else r.values = el.value.trim();
+      if (r.param) cfg.hideWhen[c.key] = r; else delete cfg.hideWhen[c.key];
+      if (k === 'hwParam') renderColumns();
+      return;
+    }
     if (k === 'group') {
       cfg.colGroups = Object.assign({}, cfg.colGroups);
       if (el.value.trim()) cfg.colGroups[c.key] = el.value.trim(); else delete cfg.colGroups[c.key];
@@ -439,7 +456,7 @@
     $('colRows').addEventListener('change', onColumnChange);
     $('cfRows').addEventListener('change', onCfChange);
     $('cfRows').addEventListener('input', e => { if (/Value$/.test(e.target.dataset.k || '')) onCfChange(e); });
-    $('colRows').addEventListener('input', e => { if (['label', 'group', 'multiplier', 'urlLabel'].includes(e.target.dataset.k)) onColumnChange(e); });
+    $('colRows').addEventListener('input', e => { if (['label', 'group', 'multiplier', 'urlLabel', 'hwValues'].includes(e.target.dataset.k)) onColumnChange(e); });
     $('filename').addEventListener('input', preview);
     $('rulesFile').addEventListener('change', e => {
       const f = e.target.files && e.target.files[0];
