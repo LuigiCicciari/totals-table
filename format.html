@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <title>Format Table</title>
-  <link rel="stylesheet" href="css/format.css?v=202611161129">
+  <link rel="stylesheet" href="css/format.css?v=202611161215">
 </head>
 <body>
   <header>
@@ -42,7 +42,7 @@
       </fieldset>
       <fieldset>
         <legend>Rows shown last</legend>
-        <p class="muted small">Optional. Catch-all values like "Other" or "Unknown" sort after everything else in their column, in any text column, so a region called "Unknown" comes last and "Texas Other" comes last among the Texas cities. Values match as whole words, ignoring case. Once someone sorts, they sort like every other row unless the box below is ticked.</p>
+        <p class="muted small">Optional. Catch-all values like "Other" or "Unknown" sort after everything else in their column, in the text columns on the left that set the default order, so a region called "Unknown" comes last and "Texas Other" comes last among the Texas cities. Values match as whole words, ignoring case. Once someone sorts, they sort like every other row unless the box below is ticked.</p>
         <label class="field">Values <input type="text" id="lastValues" size="36" placeholder="e.g. Other, Unknown"></label>
         <label class="check"><input type="checkbox" id="lastAlways"> Keep them last even when the table is sorted</label>
       </fieldset>
@@ -167,9 +167,9 @@
 
   <script src="lib/tableau.extensions.1.latest.min.js"></script>
   <script>if (/[?&]mock\b/.test(location.search)) document.write('<script src="test/mock-viz.js"><\/script>');</script>
-  <script src="src/rules.js?v=202611161129"></script>
-  <script src="src/exporter.js?v=202611161129"></script>
-  <script src="src/table.js?v=202611161129"></script>
-  <script src="src/format.js?v=202611161129"></script>
+  <script src="src/rules.js?v=202611161215"></script>
+  <script src="src/exporter.js?v=202611161215"></script>
+  <script src="src/table.js?v=202611161215"></script>
+  <script src="src/format.js?v=202611161215"></script>
 </body>
 </html>

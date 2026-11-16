@@ -2,6 +2,17 @@
 
 All notable changes to Totals Table. Versions follow [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH, where a patch fixes bugs, a minor version adds features without breaking anything, and a major version changes something existing (read its notes before updating). The version in use shows when hovering the info icon in the table's toolbar.
 
+## 1.3.2 (2026-11-16)
+
+**Fixed**
+- Viewers no longer see build details anywhere: thresholds that come from a parameter show its current value instead of its name; total descriptions use the column headers on screen; notes about blank totals and which rule applied are shown only while editing; the Compare list leaves out columns hidden by a parameter, and a difference column hides when either of its columns is hidden.
+- Top or Bottom N: viewers who can't change the layout can still turn it off with its chip; Excel keeps the Other rows even when subtotal rows are left out of the file; running totals follow the rows as shown; Keep only and Exclude no longer offer a value from inside an Other row; Copy whole table keeps grouped order.
+- Excel data bars now cover data rows only, so they also work with subtotals and Other rows.
+- A sort on a hidden column no longer applies unseen.
+- Group names containing quotation marks work in Add to group.
+- In browsers that block storage, layouts saved during the session are no longer lost when Tableau refreshes the data.
+- A second workbook that shares a sheet name and data source names keeps its viewer layouts when its fields change.
+
 ## 1.3.1 (2026-11-16)
 
 **Changed**

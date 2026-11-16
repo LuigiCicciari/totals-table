@@ -10,7 +10,7 @@
   const MAX_LEVELS = 3;
   const NUL = '\u0000null';
   // Semantic version (MAJOR.MINOR.PATCH); see CHANGELOG.md. The ?v= tags in the HTML are only for browser caches.
-  const VERSION = '1.3.1';
+  const VERSION = '1.3.2';
   const calcKey = d => d.kind === 'rank' ? '__rank:' + (d.dir || 'desc') + ':' + d.src : d.kind === 'run' ? '__run:' + d.src : '__' + d.kind + ':' + d.src + '|' + d.other;
 
   function defaults() {
@@ -35,7 +35,7 @@
       cf: {},
       colGroups: {},
       colFormat: {},
-      // Per column: hide it while a parameter has one of these values, e.g. { param: 'Show Details', values: 'False' }.
+      // Per column: hide it while a parameter has one of these values, e.g. { param: 'Show Discount', values: 'False' }.
       hideWhen: {},
       // Whole-table look. The defaults are the original design, so nothing changes until an author sets something.
       style: { size: 'normal', density: 'normal', text: '#1f2328', headBg: '#f6f8fa', headText: '#1f2328', headBold: true, headWrap: false, lines: 'both', banding: true, totBg: '#fbfbfc', totBold: true, subBg: '#f3f5f8', subBold: true, neg: '', accent: '#1f6feb' },
@@ -256,7 +256,9 @@
         const first = !this.store || this.store !== store;
         this.store = store;
         this.timing = timing;
-        if (first) { this.loadLocalLayout(); this.loadPresets(); }
+        // Without browser storage, layouts live only in memory, so they aren't reloaded (and wiped) on every
+        // data refresh.
+        if (first && (!this.layoutLoaded || this.storageOk !== false)) { this.loadLocalLayout(); this.loadPresets(); this.layoutLoaded = true; }
         this.refresh();
         if (done) this.setStatus(null);
       }).catch(e => {
@@ -291,7 +293,18 @@
         const metaKey = k => 'tp-fields:' + this.ws.name + ':' + k;
         try {
           const saved = JSON.parse(localStorage.getItem(metaKey(base)) || 'null');
-          if (Array.isArray(saved) && fieldOverlap(saved, fields) < 0.5) base += '-' + legacy;
+          if (Array.isArray(saved) && fieldOverlap(saved, fields) < 0.5) {
+            // Reuse this table's own slot if one matches its fields well enough, so small changes keep it.
+            const prefix = metaKey(base + '-');
+            let found = null;
+            for (let k = 0; k < localStorage.length; k++) {
+              const name = localStorage.key(k);
+              if (!name || !name.startsWith(prefix)) continue;
+              const f = JSON.parse(localStorage.getItem(name) || 'null');
+              if (Array.isArray(f) && fieldOverlap(f, fields) >= 0.5) { found = name.slice(metaKey('').length); break; }
+            }
+            base = found || base + '-' + legacy;
+          }
           localStorage.setItem(metaKey(base), JSON.stringify(fields));
         } catch (e) { /* storage blocked */ }
       }
@@ -328,7 +341,10 @@
         widths: Object.assign({}, base.widths, this.local.widths),
         labels: Object.assign({}, base.labels, this.local.labels)
       });
-      return this.sessionSort === undefined ? out : Object.assign({}, out, { sort: this.sessionSort });
+      const sess = {};
+      if (this.sessionSort !== undefined) sess.sort = this.sessionSort;
+      if (this.sessionTopN !== undefined) sess.topN = this.sessionTopN;
+      return Object.keys(sess).length ? Object.assign({}, out, sess) : out;
     }
 
     canEditLayout() { return this.authoring || this.cfg.allowViewerLayout; }
@@ -420,7 +436,7 @@
         raw.fill(NaN);
         if (c.vkind === 'rank') {
           const dir = c.dir === 'asc' ? 1 : -1;
-          // A zero usually means no activity (a cost-per of $0 when nothing came in), so zeros always rank last,
+          // A zero usually means no activity ($0 Sales for a city with no orders), so zeros always rank last,
           // tied with each other, whichever direction is best. Blanks get no rank.
           const rows = idx.filter(i => src[i] === src[i]).sort((a, b) => {
             const za = src[a] === 0, zb = src[b] === 0;
@@ -448,11 +464,8 @@
       const st = this.store;
       const runs = cols.filter(c => c.vkind === 'run');
       if (!runs.length) return;
-      const order = [];
-      if (this.groups) {
-        const walk = list => { for (const g of list) { if (g.children) walk(g.children); else order.push(...g.rows); } };
-        walk(this.groups);
-      } else order.push(...idx);
+      const order = this.groups ? this.orderedRows(this.groups)
+        : this.topRoot ? this.topRoot.shown.concat(this.topRoot.node ? this.topRoot.node.rows : []) : idx;
       for (const c of runs) {
         const src = st.raw[c.srcKey], raw = st.raw[c.key], fmt = st.fmt[c.key];
         raw.fill(NaN); fmt.fill(null);
@@ -500,7 +513,10 @@
     // A column hides itself when its header parameter is set to "(none)", or when its "Hide when" rule matches the
     // chosen parameter's current value. Table calculation columns follow the column they're based on.
     autoHidden(col) {
-      if (col.virtual) { const src = this.colDef(col.srcKey); return !!src && this.autoHidden(src); }
+      if (col.virtual) {
+        const src = this.colDef(col.srcKey), oth = col.otherKey && this.colDef(col.otherKey);
+        return (!!src && this.autoHidden(src)) || (!!oth && this.autoHidden(oth));
+      }
       const rule = this.cfg.hideWhen && this.cfg.hideWhen[col.key];
       if (rule && rule.param && rule.values) {
         const p = this.params.find(x => x.name.toLowerCase() === String(rule.param).toLowerCase());
@@ -720,7 +736,7 @@
 
     // Each sort breaks ties left by the one before it; empty values always go last.
     sortRows(idx, sorts, cols) {
-      const keys = sorts.map(s => {
+      const keys = sorts.filter(s => cols.some(x => x.key === s.key)).map(s => {
         const c = this.colDef(s.key);
         return c && c.vkind !== 'run' && Object.assign(this.sortKeyArray(c), { dir: s.dir === 'desc' ? -1 : 1 });
       }).filter(Boolean);
@@ -757,7 +773,7 @@
         return { type: 'sum', source: 'pct', text: 'Share of the filtered total' };
       }
       const t = R.resolveTotal(c, this.store.columns, this.cfg.rules && this.cfg.rules.doc, this.cfg.totalOverrides[c.key]);
-      t.text = R.describeTotal(t, this.store.columns);
+      t.text = R.describeTotal(t, this.store.columns.map(x => ({ key: x.key, name: this.labelFor(x) })));
       return t;
     }
 
@@ -898,6 +914,20 @@
       if (this.otherOpen.has(top.node.key)) for (const i of top.node.rows) disp.push(i);
     }
 
+    // Data rows of groups in display order: nested groups in turn, and with Top N the top rows before Other's.
+    orderedRows(list) {
+      const out = [];
+      const walk = l => {
+        for (const g of l) {
+          if (g.children) walk(g.children);
+          else if (g.top) { out.push(...g.top.shown); if (g.top.node) out.push(...g.top.node.rows); }
+          else out.push(...g.rows);
+        }
+      };
+      walk(list);
+      return out;
+    }
+
     // The Other label goes in the first text column that isn't a subtotal column.
     otherLabelKey(cols) {
       const g = new Set((this.groupCols || []).map(c => c.key));
@@ -960,7 +990,11 @@
       q('.tp-lchip').addEventListener('click', e => { if (e.currentTarget.dataset.mode === 'menu') this.openPresets(e.currentTarget); else this.resetLocal(); });
       q('.tp-lay').addEventListener('click', e => this.openPresets(e.currentTarget));
       q('.tp-vfs').addEventListener('click', e => {
-        if (e.target.closest('button[data-top]')) return this.updateLayout({ topN: null });
+        if (e.target.closest('button[data-top]')) {
+          if (this.canEditLayout()) return this.updateLayout({ topN: null });
+          this.sessionTopN = null;
+          return this.refresh();
+        }
         const b = e.target.closest('button[data-k]');
         if (b) this.clearValueFilter(b.dataset.k);
       });
@@ -1148,7 +1182,13 @@
       if ((this.layout.cfOff || []).includes(c.key)) return '\nFormatting: hidden (column menu → Show formatting)';
       if (r.type === 'bars') return '\nFormatting: data bars';
       if (r.type === 'scale') return '\nFormatting: color scale' + (r.better === 'none' ? '' : r.better === 'lower' ? ', lower is better' : ', higher is better');
-      const name = d => d && d.param ? d.param : d && d.value !== '' && d.value != null ? d.value : null;
+      const name = d => {
+        if (d && d.param) {
+          const v = this.cutValue(d);
+          return this.authoring ? d.param + (v != null ? ' (' + v + ')' : '') : v;
+        }
+        return d && d.value !== '' && d.value != null ? d.value : null;
+      };
       const lo = name(r.low), hi = name(r.high);
       return '\nFormatting: ' + (r.better === 'lower'
         ? [lo != null ? '✓ at or below ' + lo : '', hi != null ? '✕ above ' + hi : ''].filter(Boolean).join(', ')
@@ -1161,6 +1201,7 @@
       if (!t) return '';
       if (c.vkind === 'pct') return 'Share of the filtered total';
       if (c.vkind === 'rank' || c.vkind === 'run') return '';
+      if (t.problem && !this.authoring) return '';
       const problem = t.problem ? ' (total blank: ' + t.problem + ')' : '';
       if (t.type === 'ratio' || t.type === 'diff') return t.text + problem;
       if (t.type === 'avg' || t.type === 'min' || t.type === 'max') return 'Totals as the ' + { avg: 'average', min: 'minimum', max: 'maximum' }[t.type];
@@ -1241,7 +1282,9 @@
         } else if (c.isNum) {
           const v = tot[c.key];
           const text = loading ? '…' : v == null ? '' : R.formatNumber(v, c.spec);
-          const title = (c.total ? c.total.text : '') + (c.total && c.total.problem ? ' — ' + c.total.problem : '') + (c.total && c.total.source === 'override' ? ' (set for this column)' : c.total && c.total.source === 'rule' ? ' (' + c.total.label + ')' : '');
+          // Which rule produced a total, and why one is blank, are author notes.
+          const title = !c.total ? '' : !this.authoring ? (c.total.problem ? '' : c.total.text)
+            : c.total.text + (c.total.problem ? ' — ' + c.total.problem : '') + (c.total.source === 'override' ? ' (set for this column)' : c.total.source === 'rule' ? ' (' + c.total.label + ')' : '');
           const f = loading ? null : this.cellFormat(c, v, true);
           h += `<div ${this.cellAttrs(c, (c.total && c.total.problem ? 'warn' : '') + (f ? ' cf' : '') + (loading ? '' : this.negCls(c, v)), f && f.style)} title="${esc(title)}">${this.cfInner(f, esc(text))}</div>`;
         } else {
@@ -1621,7 +1664,7 @@
       for (let r = g.r0; r <= g.r1 && vals.size <= 50; r++) {
         const d = this.view.disp[r];
         let i = d;
-        if (typeof d === 'object') { if (d.colKey !== col.key) continue; i = d.rows[0]; }
+        if (typeof d === 'object') { if (d.isOther || d.colKey !== col.key) continue; i = d.rows[0]; }
         if (typeof i !== 'number') continue;
         if (col.isNum) { const v = this.store.raw[col.key][i]; vals.add(v === v && v != null ? v : NUL); }
         else vals.add(fmt[i] == null ? NUL : fmt[i]);
@@ -1725,7 +1768,7 @@
         const all = [];
         for (const d of disp) {
           if (typeof d === 'number') all.push(d);
-          else if (d.isOther ? !this.otherOpen.has(d.key) : this.collapsed.has(d.key)) all.push(...d.rows);
+          else if (d.isOther ? !this.otherOpen.has(d.key) : this.collapsed.has(d.key)) all.push(...(d.isOther ? d.rows : this.orderedRows([d])));
         }
         rows = all.map(i => ({ i }));
       } else if (rg && !(rg.r0 === rg.r1 && rg.c0 === rg.c1 && this.selected.size > 1)) {
@@ -2019,7 +2062,7 @@
       }
       items.push('-', ['stats', 'Column stats…']);
       const infos = [];
-      if (c.isNum && c.total) infos.push(['info', 'Total: ' + c.total.text + (c.total.problem ? ' (' + c.total.problem + ')' : ''), true]);
+      if (c.isNum && c.total) infos.push(['info', 'Total: ' + (c.total.problem && !this.authoring ? 'not available' : c.total.text + (c.total.problem ? ' (' + c.total.problem + ')' : '')), true]);
       const cfText = this.cfDescribe(c).trim();
       if (cfText) infos.push(['info', cfText, true]);
       // Field and parameter names are how the dashboard is built; only authors see them.
@@ -2027,7 +2070,7 @@
       if (infos.length) items.push('-', ...infos);
       if (this.authoring) items.push(['format', 'Format table…']);
       const html = '<div class="tp-menu" role="menu">' + items.filter(Boolean).map(it => it === '-' ? '<hr>' :
-        `<button type="button" role="menuitem" data-a="${it[0]}"${it[2] ? ' disabled' : ''}>${esc(it[1])}</button>`).join('') + '</div>';
+        `<button type="button" role="menuitem" data-a="${esc(it[0])}"${it[2] ? ' disabled' : ''}>${esc(it[1])}</button>`).join('') + '</div>';
       this.openPop(anchor, html, pop => pop.addEventListener('click', e => {
         const b = e.target.closest('button[data-a]');
         if (!b) return;
@@ -2134,7 +2177,7 @@
 
     openCompare(i, anchor) {
       const c = this.view.cols[i];
-      const others = this.store.columns.filter(x => x.isNum && !x.virtual && x.key !== c.key);
+      const others = this.store.columns.filter(x => x.isNum && !x.virtual && x.key !== c.key && !this.autoHidden(x));
       if (!others.length) return this.flash('There is no other number column to compare with.');
       const html = `<div class="tp-menu tp-picker tp-compare"><div class="tp-ph">Compare ${esc(c.label)} with</div>` +
         `<select aria-label="Column to compare with">${others.map(x => `<option value="${esc(x.key)}">${esc(this.labelFor(x))}</option>`).join('')}</select>` +
@@ -2282,7 +2325,7 @@
       if (this.authoring) items.push('-', ['rename', 'Rename group…'], ['remove', 'Remove group "' + s.label + '"']);
       if (!items.length) items.push(['none', s.label, true]);
       const html = '<div class="tp-menu" role="menu">' + items.filter(Boolean).map(it => it === '-' ? '<hr>' :
-        `<button type="button" role="menuitem" data-a="${it[0]}"${it[2] ? ' disabled' : ''}>${esc(it[1])}</button>`).join('') + '</div>';
+        `<button type="button" role="menuitem" data-a="${esc(it[0])}"${it[2] ? ' disabled' : ''}>${esc(it[1])}</button>`).join('') + '</div>';
       this.openPop(anchor, html, pop => pop.addEventListener('click', e => {
         const b = e.target.closest('button[data-a]');
         if (!b) return;
@@ -2370,11 +2413,12 @@
       // start with the same groups collapsed. With Top N, the top rows come first, then the Other row with the
       // rest grouped under it (closed unless it is open on screen).
       let rows;
+      const sub = this.cfg.export.subtotals;
       const pushTop = (top, level, hid) => {
         for (const i of top.shown) rows.push({ type: 'data', i, level, hidden: hid });
         const n = top.node;
         const open = this.otherOpen.has(n.key);
-        rows.push({ type: 'group', label: 'Other (' + n.rows.length.toLocaleString() + (n.rows.length === 1 ? ' row)' : ' rows)'), totals: Object.assign({ __label: n.colKey }, n.totals), collapsed: !open, level, hidden: hid });
+        rows.push({ type: 'group', isOther: true, label: 'Other (' + n.rows.length.toLocaleString() + (n.rows.length === 1 ? ' row)' : ' rows)'), totals: Object.assign({ __label: n.colKey }, n.totals), collapsed: !open, level, hidden: hid });
         for (const i of n.rows) rows.push({ type: 'data', i, level: level + 1, hidden: hid || !open });
       };
       if (this.groups) {
@@ -2383,10 +2427,12 @@
           for (const g of list) {
             const collapsed = this.collapsed.has(g.key);
             rows.push({ type: 'group', label: g.label + ' subtotal', totals: Object.assign({ __label: g.colKey }, g.totals), collapsed, level: g.level, hidden: hiddenAbove });
-            const hid = hiddenAbove || collapsed;
+            // Without subtotal rows in the file, there is no group outline to open, so nothing is hidden by it.
+            const hid = sub && (hiddenAbove || collapsed);
+            const lv = sub ? g.level + 1 : 0;
             if (g.children) walk(g.children, hid);
-            else if (g.top && g.top.node) pushTop(g.top, g.level + 1, hid);
-            else for (const i of g.rows) rows.push({ type: 'data', i, level: g.level + 1, hidden: hid });
+            else if (g.top && g.top.node) pushTop(g.top, lv, hid);
+            else for (const i of g.rows) rows.push({ type: 'data', i, level: lv, hidden: hid });
           }
         };
         walk(this.groups, false);

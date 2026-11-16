@@ -6,7 +6,7 @@
 
   const TOTAL_TYPES = ['auto', 'sum', 'avg', 'min', 'max', 'ratio', 'none'];
 
-  // "AGG(Cost per Visit)" -> "Cost per Visit"; plain names pass through. Only Tableau's own aggregation and date
+  // "AGG(Profit Ratio)" -> "Profit Ratio"; plain names pass through. Only Tableau's own aggregation and date
   // prefixes are removed, so a field named "Profit(Adj)" keeps its name.
   const AGG_PREFIX = /^(AGG|SUM|AVG|MIN|MAX|MEDIAN|COUNT|COUNTD|CNT|CNTD|ATTR|STDEV|STDEVP|VAR|VARP|PCT\d*|YEAR|QUARTER|MONTH|WEEK|DAY|WEEKDAY|HOUR|MINUTE|SECOND|MDY|MY|YR|QR|MN|DY|WK|TYR|TQR|TMN|TWK|TDY|USR|NONE)\((.*)\)$/i;
   function normName(fieldName) {

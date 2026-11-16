@@ -134,7 +134,9 @@
     };
 
     // Subtotal rows sit above their detail rows, which are grouped with Excel's outline (+/- in the margin).
-    const outline = snap.includeSubtotals && snap.rows.some(r => r.type === 'group');
+    // Other rows (Top N) are kept even when subtotal rows are left out, so the file still matches the screen.
+    const keepGroup = r => r.type === 'group' && (snap.includeSubtotals || r.isOther);
+    const outline = snap.rows.some(keepGroup);
     if (outline) {
       ws.properties.outlineProperties = { summaryBelow: false, summaryRight: false };
       ws.properties.outlineLevelRow = Math.max(...snap.rows.map(r => r.level || 0));
@@ -153,9 +155,10 @@
     styleRow(ws.addRow(cols.map(c => cleanText(c.label))), 'header');
     if (top) { const totVals = totalsValues(snap.totals, 'Total'); const tr = ws.addRow(totVals); styleRow(tr, 'totals'); applyFormat(tr, totVals, true); }
     const firstData = ws.rowCount + 1;
+    const dataRows = [];
     for (const r of snap.rows) {
       if (r.type === 'group') {
-        if (!outline) continue;
+        if (!keepGroup(r)) continue;
         const gv = totalsValues(r.totals, r.label);
         const gr = ws.addRow(gv);
         styleRow(gr, 'group');
@@ -165,6 +168,7 @@
       } else {
         const vals = cols.map(c => xlCell(snap.value(c, r.i), c));
         const row = ws.addRow(vals);
+        dataRows.push(ws.rowCount);
         vals.forEach((v, k) => { if (v && v.hyperlink) row.getCell(k + 1).font = { color: { argb: 'FF0563C1' }, underline: true }; });
         cols.forEach((c, k) => { if (c.bold) { const cell = row.getCell(k + 1); cell.font = Object.assign({}, cell.font, { bold: true }); } });
         applyFormat(row, vals, false);
@@ -183,12 +187,15 @@
       ws.getColumn(k + 1).eachCell((cell, rowNo) => { if (rowNo >= headRow) cell.alignment = Object.assign({}, cell.alignment, { horizontal }); });
     });
     // Data bars use Excel's own data bars over the data rows, so they stay live if values change in Excel.
+    // Bars cover data rows only (never subtotal or Other rows), as runs of consecutive rows sharing one scale.
+    const runs = [];
+    for (const n of dataRows) { const last = runs[runs.length - 1]; if (last && last[1] === n - 1) last[1] = n; else runs.push([n, n]); }
     for (const b of snap.barColumns || []) {
       const k = cols.findIndex(c => c.key === b.key);
-      if (k < 0 || lastData < firstData || outline) continue;
+      if (k < 0 || !runs.length) continue;
       const letter = ws.getColumn(k + 1).letter;
       ws.addConditionalFormatting({
-        ref: letter + firstData + ':' + letter + lastData,
+        ref: runs.map(([a, z]) => letter + a + ':' + letter + z).join(' '),
         rules: [{ type: 'dataBar', gradient: false, cfvo: [{ type: 'min' }, { type: 'max' }], color: { argb: 'FFA9CDEB' } }]
       });
     }
