@@ -2,6 +2,22 @@
 
 All notable changes to Totals Table. Versions follow [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH, where a patch fixes bugs, a minor version adds features without breaking anything, and a major version changes something existing (read its notes before updating). The version in use shows when hovering the info icon in the table's toolbar.
 
+## 1.4.2 (2026-11-16)
+
+**Fixed**
+- Saved layouts only ever set the parameters that decide what columns show today, even if a layout file lists others, so a layout can never change a date range.
+- Parameters added or renamed after the table was placed are picked up without reopening the workbook (in Format and for Hide when and layouts).
+- Dragging the freeze line while the table is scrolled sideways moves it where you point instead of jumping several columns. The freeze line and the resize grip beside it are easier to grab.
+- "Reset name" for viewers only appears for their own renames and brings back the author's name.
+- Layout actions (Update, Rename, Delete, choosing a layout) work correctly even if the data refreshes while the Layouts menu is open. Choosing a layout no longer briefly shows "(edited)", and sorting then clearing the sort no longer counts as an edit.
+- "Save current layout as" with an existing name asks before replacing it.
+- Selections and highlighted cells clear when the data refreshes or the table is re-sorted, instead of landing on different rows.
+- Data loads run one at a time, so quick successive refreshes can't collide.
+- Excel data bars respect a viewer's Hide formatting and scale from zero like the bars on screen.
+- Copying a subtotal or Other row copies what it shows. CSV header names are protected against spreadsheet formulas.
+- Tableau tooltips close when the pointer moves onto subtotal or Other rows. A resize can no longer trigger a sort by accident. Right-click allows paste in text boxes.
+- "Keep them last even when sorted" checks the same leading text columns as the default order.
+
 ## 1.4.1 (2026-11-16)
 
 **Fixed**

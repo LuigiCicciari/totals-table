@@ -110,7 +110,7 @@
     const labels = cfg.layout.labels || {};
     $('colRows').innerHTML = cols.map((c, i) => {
       const link = cfg.headerLinks[c.key];
-      const linkSel = link === undefined ? 'auto' : link === '' ? 'none' : link;
+      const linkSel = link === undefined ? '__auto__' : link === '' ? '__none__' : link;
       const autoParam = params.find(p => p.toLowerCase() === c.name.toLowerCase());
       const o = cfg.totalOverrides[c.key] || { type: 'auto' };
       const totalCell = c.isNum
@@ -123,8 +123,8 @@
         <td><input type="text" data-i="${i}" data-k="label" value="${esc(labels[c.key] || '')}" placeholder="${esc(autoParam ? 'Parameter value' : c.name)}"></td>
         <td><input type="text" class="grp" data-i="${i}" data-k="group" list="groupList" value="${esc(cfg.colGroups[c.key] || '')}" placeholder="None" aria-label="Group for ${esc(c.name)}"></td>
         <td><select data-i="${i}" data-k="link">
-          <option value="auto"${linkSel === 'auto' ? ' selected' : ''}>Auto${autoParam ? ' (' + esc(autoParam) + ')' : ' (none found)'}</option>
-          <option value="none"${linkSel === 'none' ? ' selected' : ''}>Don't link</option>
+          <option value="__auto__"${linkSel === '__auto__' ? ' selected' : ''}>Auto${autoParam ? ' (' + esc(autoParam) + ')' : ' (none found)'}</option>
+          <option value="__none__"${linkSel === '__none__' ? ' selected' : ''}>Don't link</option>
           ${params.map(p => `<option value="${esc(p)}"${linkSel === p ? ' selected' : ''}>${esc(p)}</option>`).join('')}
         </select></td>
         <td>${totalBlock}</td>
@@ -174,8 +174,8 @@
       return;
     }
     if (k === 'link') {
-      if (el.value === 'auto') delete cfg.headerLinks[c.key];
-      else cfg.headerLinks[c.key] = el.value === 'none' ? '' : el.value;
+      if (el.value === '__auto__') delete cfg.headerLinks[c.key];
+      else cfg.headerLinks[c.key] = el.value === '__none__' ? '' : el.value;
       return;
     }
     if (k === 'urlMode' || k === 'urlLabel' || k === 'linkTo') {

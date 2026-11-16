@@ -59,7 +59,7 @@ A fast table for Tableau worksheets, with correct totals for ratio columns, head
 - What is on screen: visible columns, in order, with the current sort and filters
 - Links come out as clickable hyperlinks in Excel and as plain text or addresses in CSV
 - Excel: plain values, never formulas; Tableau's number formats carried over ($, %, thousands, decimals, K/M/B); real dates, including text columns that hold ISO dates (such as `STR([Date])`); bold header and totals; frozen header and frozen columns
-- CSV: raw data only. Every row, never totals or subtotals. UTF-8, numbers rounded to what the table shows, dates as `yyyy-mm-dd`
+- CSV: raw data only. Every row, never totals or subtotals. UTF-8, numbers rounded to the decimals the table shows (columns shown in K, M or B keep their full values), dates as `yyyy-mm-dd`
 - Collapsed subtotal groups never hide rows from a download. In Excel, subtotal rows sit above their rows, grouped with Excel's +/- outline (one outline level per subtotal level, so Excel's 1 2 3 buttons collapse to each level), and groups collapsed in the table start collapsed in the file
 - File name template with `{sheet}`, `{date}`, `{time}` and `{param:Parameter Name}`
 

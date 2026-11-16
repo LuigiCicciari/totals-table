@@ -10,7 +10,7 @@
   const MAX_LEVELS = 3;
   const NUL = '\u0000null';
   // Semantic version (MAJOR.MINOR.PATCH); see CHANGELOG.md. The ?v= tags in the HTML are only for browser caches.
-  const VERSION = '1.4.1';
+  const VERSION = '1.4.2';
   const calcKey = d => d.kind === 'rank' ? '__rank:' + (d.dir || 'desc') + ':' + d.src : d.kind === 'run' ? '__run:' + d.src : '__' + d.kind + ':' + d.src + '|' + d.other;
 
   function defaults() {
@@ -112,8 +112,8 @@
       await tableau.extensions.initializeAsync({ configure: () => this.openFormat() });
       this.loadConfig();
       const ws = this.ws;
-      ws.addEventListener(tableau.TableauEventType.SummaryDataChanged, () => this.reload());
-      tableau.extensions.settings.addEventListener(tableau.TableauEventType.SettingsChanged, () => { this.loadConfig(); this.refresh(); });
+      ws.addEventListener(tableau.TableauEventType.SummaryDataChanged, () => { this.loadParams(); this.reload(); });
+      tableau.extensions.settings.addEventListener(tableau.TableauEventType.SettingsChanged, () => { this.loadConfig(); this.loadParams().then(() => this.refresh()); });
       await this.loadParams();
       await this.loadSourceNames();
       this.reload();
@@ -192,7 +192,7 @@
       st.fmtBase = st.fmtBase || {};
       for (const c of st.columns) {
         const o = (!c.virtual && this.cfg.colFormat[c.key]) || {};
-        c.cls = (o.align ? ' al-' + o.align : '') + (o.bold ? ' b' : '');
+        c.cls = (['l', 'c', 'r'].includes(o.align) ? ' al-' + o.align : '') + (o.bold ? ' b' : '');
         if (!c.isNum) continue;
         if (c.virtual) {
           // Differences and running totals are in the source column's units, so they share its format.
@@ -229,31 +229,39 @@
       this.saveTimer = setTimeout(() => tableau.extensions.settings.saveAsync().catch(e => this.flash('Could not save: ' + e.message)), 600);
     }
 
+    // Re-read whenever the workbook may have changed, so parameters added or renamed after the table was placed
+    // are picked up without reopening the workbook. Each parameter gets one change listener.
     async loadParams() {
       try {
         const ps = await this.ws.getParametersAsync();
         this.paramObjs = ps;
         this.params = ps.map(p => ({ name: p.name, value: p.currentValue ? String(p.currentValue.formattedValue) : '', raw: p.currentValue ? p.currentValue.value : null }));
-        ps.forEach(p => p.addEventListener(tableau.TableauEventType.ParameterChanged, () => this.onParamChanged()));
+        this.paramListened = this.paramListened || new Set();
+        ps.forEach(p => {
+          const id = p.id || p.name;
+          if (this.paramListened.has(id)) return;
+          this.paramListened.add(id);
+          p.addEventListener(tableau.TableauEventType.ParameterChanged, () => this.onParamChanged());
+        });
       } catch (e) {
-        this.params = [];
+        if (!this.params) this.params = [];
       }
     }
 
     async onParamChanged() {
-      try {
-        const ps = await this.ws.getParametersAsync();
-        this.params = ps.map(p => ({ name: p.name, value: p.currentValue ? String(p.currentValue.formattedValue) : '', raw: p.currentValue ? p.currentValue.value : null }));
-      } catch (e) { /* keep previous values */ }
+      await this.loadParams();
       this.refresh();
     }
 
     reload() {
       const gen = ++this.gen;
       this.setStatus('Loading…');
-      TPData.load(this.ws, () => gen === this.gen, (store, timing, done) => {
+      const prev = this.loading || Promise.resolve();
+      this.loading = prev.catch(() => {}).then(() => gen !== this.gen ? null : TPData.load(this.ws, () => gen === this.gen, (store, timing, done) => {
         if (gen !== this.gen) return;
         const first = !this.store || this.store !== store;
+        // Row positions change with new data, so a selection would land on different rows.
+        if (first && this.store) { this.selected.clear(); this.range = null; }
         this.store = store;
         this.timing = timing;
         // Without browser storage, layouts live only in memory, so they aren't reloaded (and wiped) on every
@@ -261,7 +269,7 @@
         if (first && (!this.layoutLoaded || this.storageOk !== false)) { this.loadLocalLayout(); this.loadPresets(); this.layoutLoaded = true; }
         this.refresh();
         if (done) this.setStatus(null);
-      }).catch(e => {
+      })).catch(e => {
         if (gen === this.gen) this.setStatus('Could not load data: ' + ((e && e.message) || e), true);
       });
     }
@@ -337,9 +345,11 @@
 
     get layout() {
       const base = this.cfg.layout;
+      const ownLabels = {};
+      for (const [k, v] of Object.entries((this.local && this.local.labels) || {})) if (v) ownLabels[k] = v;
       const out = !this.local ? base : Object.assign({}, base, this.local, {
         widths: Object.assign({}, base.widths, this.local.widths),
-        labels: Object.assign({}, base.labels, this.local.labels)
+        labels: Object.assign({}, base.labels, ownLabels)
       });
       const sess = {};
       if (this.sessionSort !== undefined) sess.sort = this.sessionSort;
@@ -745,7 +755,9 @@
       // column go after the rest, which are sorted as usual.
       let lastRow = null;
       if (this.cfg.lastRows.always) {
-        const flags = cols.map(c => this.lastFlags(c)).filter(Boolean);
+        const lead = [];
+        for (const c of cols) { if (c.isNum) break; lead.push(c); }
+        const flags = lead.map(c => this.lastFlags(c)).filter(Boolean);
         if (flags.length) lastRow = i => flags.some(f => f[i]);
       }
       idx.sort((a, b) => {
@@ -1495,6 +1507,7 @@
 
     // Sorting always works; when viewers can't change the layout it lasts only for this session.
     setSort(sort) {
+      this.range = null;
       if (this.canEditLayout()) return this.updateLayout({ sort });
       this.sessionSort = sort;
       this.refresh();
@@ -1542,6 +1555,8 @@
       const up = () => {
         window.removeEventListener('mousemove', move);
         window.removeEventListener('mouseup', up);
+        this.suppressClick = true;
+        setTimeout(() => { this.suppressClick = false; }, 0);
         if (c.w !== w0) this.updateLayout({ widths: Object.assign({}, this.layout.widths, { [c.key]: c.w }) });
       };
       window.addEventListener('mousemove', move);
@@ -1551,29 +1566,36 @@
     startFreezeDrag(e) {
       e.preventDefault();
       e.stopPropagation();
-      const gridLeft = this.grid.getBoundingClientRect().left;
       const bounds = [0];
       this.view.cols.forEach(c => bounds.push(bounds[bounds.length - 1] + c.w));
       let n = this.view.nFrozen;
       const n0 = n;
+      // Frozen columns are pinned on the left, so edges up to the freeze line sit where they are drawn and the rest
+      // shift with the scroll; only edges that are visible can be chosen.
+      const sc = this.scroller, sl = sc.scrollLeft, frozenW = this.frozenWidth || 0;
+      const vis = k => k <= n0 ? bounds[k] : bounds[k] - sl;
+      const usable = k => k <= n0 || vis(k) >= frozenW;
+      const guidePos = k => (k <= n0 ? bounds[k] + sl : bounds[k]) + 'px';
       const guide = document.createElement('div');
       guide.className = 'tp-guide';
-      guide.style.left = bounds[n] + 'px';
+      guide.style.left = guidePos(n);
       this.grid.appendChild(guide);
       // The hand closes while the freeze line is being moved.
       this.grid.classList.add('tp-dragging');
       const move = ev => {
-        const x = ev.clientX - gridLeft;
-        let best = 0;
-        bounds.forEach((b, k) => { if (Math.abs(b - x) < Math.abs(bounds[best] - x)) best = k; });
+        const x = ev.clientX - sc.getBoundingClientRect().left;
+        let best = n0;
+        bounds.forEach((b, k) => { if (usable(k) && Math.abs(vis(k) - x) < Math.abs(vis(best) - x)) best = k; });
         n = best;
-        guide.style.left = bounds[best] + 'px';
+        guide.style.left = guidePos(best);
       };
       const up = () => {
         window.removeEventListener('mousemove', move);
         window.removeEventListener('mouseup', up);
         guide.remove();
         this.grid.classList.remove('tp-dragging');
+        this.suppressClick = true;
+        setTimeout(() => { this.suppressClick = false; }, 0);
         if (n !== n0) this.updateLayout({ freeze: n });
       };
       window.addEventListener('mousemove', move);
@@ -1660,7 +1682,7 @@
           if (text) this.copyToClipboard(text, b.dataset.m === 'all' ? this.view.idx.length : null);
         }));
       });
-      this.el.addEventListener('contextmenu', e => e.preventDefault());
+      this.el.addEventListener('contextmenu', e => { if (!e.target.closest('input, textarea')) e.preventDefault(); });
     }
 
     // ---------- keep only / exclude ----------
@@ -1756,7 +1778,8 @@
       const r = this.rowAt(e.target);
       const d = this.view.disp[r];
       const tid = typeof d === 'number' ? this.store.tuple[d] : null;
-      if (tid == null || tid === this.hoverTid) return;
+      if (tid == null) return this.unhover();
+      if (tid === this.hoverTid) return;
       this.hoverTid = tid;
       clearTimeout(this.hoverT);
       const x = e.clientX, y = e.clientY;
@@ -1809,6 +1832,16 @@
       if (headers) lines.push(cols.slice(c0, c1 + 1).map(c => c.label).join('\t'));
       for (const r of rows) {
         const d = typeof r === 'object' ? r.i : disp[r];
+        if (d && typeof d === 'object') {
+          const vals = [];
+          for (let j = c0; j <= c1; j++) {
+            const c = cols[j];
+            const v = c.key === d.colKey ? d.label + (d.isOther ? ' (' + d.rows.length + ')' : '') : c.isNum && d.totals[c.key] != null ? R.formatNumber(d.totals[c.key], c.spec) : '';
+            vals.push(String(v).replace(/[\t\r\n]+/g, ' '));
+          }
+          lines.push(vals.join('\t'));
+          continue;
+        }
         if (typeof d !== 'number') continue;
         const vals = [];
         for (let j = c0; j <= c1; j++) { const v = st.fmt[cols[j].key][d]; vals.push(v == null ? '' : v.replace(/[\t\r\n]+/g, ' ')); }
@@ -1877,7 +1910,8 @@
 
     // A layout is edited when its arrangement or any of its saved column parameters has changed.
     presetEdited(p) {
-      if (JSON.stringify(this.local || {}) !== JSON.stringify(p.layout || {})) return true;
+      if (this.restoring) return false;
+      if (normLayout(this.local) !== normLayout(p.layout)) return true;
       const cur = this.captureParams();
       const saved = p.params || {};
       // A layout saved without a column setting (for example before layouts kept them) counts as edited,
@@ -1912,14 +1946,20 @@
     // Sets saved parameter values (only those that differ). Values no longer allowed are skipped with a note.
     async restoreParams(saved) {
       let failed = 0, changed = 0;
+      // Only parameters that decide what columns show today; anything else in a saved or imported layout is ignored.
+      await this.loadParams();
+      const allowed = new Set(this.layoutParamNames().map(n => n.toLowerCase()));
+      this.restoring = true;
       for (const [name, value] of Object.entries(saved || {})) {
+        if (!allowed.has(name.toLowerCase())) continue;
         const obj = (this.paramObjs || []).find(p => p.name.toLowerCase() === name.toLowerCase());
         const cur = this.params.find(p => p.name.toLowerCase() === name.toLowerCase());
         if (!obj || !obj.changeValueAsync) { failed++; continue; }
         if (cur && (String(cur.raw) === String(value) || String(cur.value) === String(value))) continue;
         try { await obj.changeValueAsync(value); changed++; } catch (e) { failed++; }
       }
-      if (changed) await this.onParamChanged();
+      this.restoring = false;
+      if (changed) await this.onParamChanged(); else this.renderBar();
       if (failed) this.flash('Some saved column settings could not be restored, so the dashboard keeps its current choice for them.');
     }
 
@@ -1937,6 +1977,8 @@
       this.presets.active = name;
       this.savePresets();
       this.collapsed = new Set();
+      // While its parameters are being set, the layout isn't shown as edited.
+      if (p.params && Object.keys(p.params).length) this.restoring = true;
       this.refresh();
       // Then set the column parameters the layout was saved with, which also updates the dashboard's controls.
       if (p.params && Object.keys(p.params).length) return this.restoreParams(p.params);
@@ -1995,7 +2037,7 @@
       const btn = (a, label, extra) => `<button type="button" data-a="${a}"${extra || ''}>${esc(label)}</button>`;
       let h = '<div class="tp-menu tp-lays" role="menu"><div class="tp-ph">Layouts</div>';
       h += btn('pub', (!act && !hasLocal ? '✓ ' : '') + 'Published layout');
-      L.forEach((p, i) => { h += btn('apply', (p === act ? '✓ ' : '') + p.name, ` data-i="${i}"`); });
+      L.forEach(p => { h += btn('apply', (p === act ? '✓ ' : '') + p.name, ` data-name="${esc(p.name)}"`); });
       h += '<hr>';
       if (mode === 'save' || mode === 'rename') {
         const val = mode === 'rename' && act ? act.name : '';
@@ -2025,13 +2067,27 @@
           const b = e.target.closest('button[data-a]');
           if (!b || b.disabled) return;
           const a = b.dataset.a;
+          // The data may have refreshed while the menu was open, which reloads the saved list.
+          const L = this.presets.list, act = this.activePreset();
           if (a === 'save' || a === 'rename') return this.openPresets(anchor, a);
           if (a === 'delete' && !confirmDelete) return this.openPresets(anchor, null, true);
           if (a === 'import') return pop.querySelector('input[type="file"]').click();
           this.closePop();
           if (a === 'pub') return this.resetLocal();
-          if (a === 'apply') return this.applyPreset(L[+b.dataset.i].name);
-          if (a === 'save-ok') return this.savePresetAs(input.value);
+          if (a === 'apply') return this.applyPreset(b.dataset.name);
+          if (a === 'save-ok') {
+            const name = input.value.trim().slice(0, 60);
+            if (name && this.presets.list.some(x => x.name === name) && this.confirmReplace !== name) {
+              this.confirmReplace = name;
+              this.openPresets(anchor, 'save');
+              const box = this.pop.querySelector('.tp-lname input');
+              if (box) box.value = name;
+              this.flash('A layout named "' + name + '" already exists. Click Save again to replace it.');
+              return;
+            }
+            this.confirmReplace = null;
+            return this.savePresetAs(input.value);
+          }
           if (a === 'rename-ok') {
             const name = input.value.trim().slice(0, 60);
             if (!name || !act) return;
@@ -2108,7 +2164,7 @@
           gl >= 0 ? ['ungroup', gk.length > 1 ? 'Remove subtotal level ' + (gl + 1) : 'Remove subtotals'] : null,
           gl >= 0 ? ['collapse-all', 'Collapse all'] : null,
           gl >= 0 ? ['expand-all', 'Expand all'] : null, '-',
-          ['rename', 'Rename…'], lay.labels && lay.labels[c.key] ? ['unrename', 'Reset name'] : null);
+          ['rename', 'Rename…'], (this.authoring ? lay.labels && lay.labels[c.key] : this.local && this.local.labels && this.local.labels[c.key]) ? ['unrename', 'Reset name'] : null);
         // Shares only make sense for columns that add up, so ratio columns don't offer it.
         // Viewers can hide formatting they find distracting; it's saved with their layout.
         if (c.isNum && this.cfg.cf[c.key] && this.cfg.cf[c.key].type) {
@@ -2327,12 +2383,8 @@
           return;
         }
         case 'unrename': {
-          const labels = Object.assign({}, lay.labels);
+          const labels = Object.assign({}, this.authoring ? lay.labels : (this.local && this.local.labels) || {});
           delete labels[c.key];
-          if (!this.authoring) {
-            const base = this.cfg.layout.labels || {};
-            if (base[c.key]) labels[c.key] = '';
-          }
           return this.updateLayout({ labels });
         }
         case 'format': return this.openFormat();
@@ -2444,8 +2496,9 @@
 
     // ---------- format dialog ----------
 
-    openFormat() {
+    async openFormat() {
       if (!this.store) return;
+      await this.loadParams();
       const payload = JSON.stringify({
         config: this.cfg,
         sheet: this.ws.name,
@@ -2538,7 +2591,7 @@
           return out;
         }, []).filter(s => s.label) : null,
         format: (sc, v, isTotal) => this.cellFormat(this.colDef(sc.key), v, isTotal),
-        barColumns: cols.filter(c => c.isNum && this.cfg.cf[c.key] && this.cfg.cf[c.key].type === 'bars').map(c => ({ key: c.key, totals: !!this.cfg.cf[c.key].totals }))
+        barColumns: cols.filter(c => c.isNum && this.cfg.cf[c.key] && this.cfg.cf[c.key].type === 'bars' && !(this.layout.cfOff || []).includes(c.key)).map(c => ({ key: c.key, totals: !!this.cfg.cf[c.key].totals }))
       };
     }
 
@@ -2573,6 +2626,17 @@
     if (!o || typeof o !== 'object' || Array.isArray(o)) return out;
     for (const k of Object.keys(o)) { const v = o[k]; if (['string', 'number', 'boolean'].includes(typeof v)) out[k] = v; }
     return out;
+  }
+
+  // Layout settings compared without empty values, so "no sort" and a cleared sort count as the same.
+  function normLayout(l) {
+    const o = {};
+    for (const k of Object.keys(l || {}).sort()) {
+      const v = l[k];
+      if (v == null || (Array.isArray(v) && !v.length) || (typeof v === 'object' && !Array.isArray(v) && !Object.keys(v).length)) continue;
+      o[k] = v;
+    }
+    return JSON.stringify(o);
   }
 
   function fieldOverlap(a, b) {

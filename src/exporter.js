@@ -49,7 +49,7 @@
     const lines = [];
     const cols = snap.columns;
     const row = cells => lines.push(cells.map(csvEscape).join(','));
-    row(cols.map(c => cleanText(c.label)));
+    row(cols.map(c => noFormula(cleanText(c.label))));
     for (const r of snap.rows) {
       if (r.type !== 'data') continue;
       row(cols.map(c => csvCell(snap.value(c, r.i), c)));
@@ -196,7 +196,7 @@
       const letter = ws.getColumn(k + 1).letter;
       ws.addConditionalFormatting({
         ref: runs.map(([a, z]) => letter + a + ':' + letter + z).join(' '),
-        rules: [{ type: 'dataBar', gradient: false, cfvo: [{ type: 'min' }, { type: 'max' }], color: { argb: 'FFA9CDEB' } }]
+        rules: [{ type: 'dataBar', gradient: false, cfvo: [{ type: 'num', value: 0 }, { type: 'max' }], color: { argb: 'FFA9CDEB' } }]
       });
     }
     // Excel's filter/sort would scramble subtotal groups, so it is only added to plain tables.
