@@ -22,7 +22,9 @@ A fast table for Tableau worksheets, with correct totals for ratio columns, head
 - Right-click to copy cells, cells with headers, or the whole table (data rows only, in on-screen order). Tableau Desktop keeps Ctrl+C for itself, so right-click is the reliable way
 - Tableau tooltips on hover, mark selection on click (Ctrl/Cmd-click adds), so dashboard actions keep working
 - Only the rows on screen are drawn, so large tables scroll smoothly. Rows appear while the rest are still loading
-- The info icon shows load timing, split into Tableau query time and load/draw time
+- The info icon shows the version Tableau is running (so you can tell when an update has reached Cloud) and load timing, split into Tableau query time and load/draw time
+- Hovering a header shows its name, how it totals when that isn't a plain sum (for example "Profit ÷ Sales" for Profit Ratio, taken from the totals rules), and its sort. The column menu adds the total, any formatting rule and the original field name
+- When filters leave no rows, the table says so and offers Clear filters
 
 **Totals**
 - Ratio columns total as a ratio of the summed parts, not a sum of ratios. Divide by zero gives a blank

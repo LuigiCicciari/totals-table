@@ -9,6 +9,11 @@
   const FREEZE_MAX = 0.6;
   const MAX_LEVELS = 3;
   const NUL = '\u0000null';
+  const VERSION = (() => {
+    const src = document.currentScript && document.currentScript.src;
+    const m = src && src.match(/[?&]v=(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})/);
+    return m ? m[1] + '-' + m[2] + '-' + m[3] + ' ' + m[4] + ':' + m[5] : 'development copy';
+  })();
   const calcKey = d => d.kind === 'rank' ? '__rank:' + (d.dir || 'desc') + ':' + d.src : d.kind === 'run' ? '__run:' + d.src : '__' + d.kind + ':' + d.src + '|' + d.other;
 
   function defaults() {
@@ -906,7 +911,7 @@
         chip.title = 'Your column changes are saved in this browser only';
       }
       const t = this.timing;
-      q('.tp-info').title = t ? 'Tableau query ' + (t.query / 1000).toFixed(2) + 's · all rows loaded ' + ((t.fetch || 0) / 1000).toFixed(2) + 's · last draw ' + Math.round(t.draw || 0) + ' ms' + (this.freezePaused ? '\nFreeze paused: frozen columns are wider than 60% of the table.' : '') : '';
+      q('.tp-info').title = 'Totals Table version ' + VERSION + (t ? '\n' : '') + (t ? 'Tableau query ' + (t.query / 1000).toFixed(2) + 's · all rows loaded ' + ((t.fetch || 0) / 1000).toFixed(2) + 's · last draw ' + Math.round(t.draw || 0) + ' ms' + (this.freezePaused ? '\nFreeze paused: frozen columns are wider than 60% of the table.' : '') : '');
     }
 
     template() { return this.view.cols.map(c => c.w + 'px').join(' '); }
@@ -1024,6 +1029,19 @@
         : [lo != null ? '✕ below ' + lo : '', hi != null ? '✓ at or above ' + hi : ''].filter(Boolean).join(', ')) + (lo != null && hi != null ? ', ! in between' : '');
     }
 
+    // How a number column totals, in words, for the header tooltip. Plain sums say nothing.
+    formulaLine(c) {
+      const t = c.isNum && c.total;
+      if (!t) return '';
+      if (c.vkind === 'pct') return 'Share of the filtered total';
+      if (c.vkind === 'rank' || c.vkind === 'run') return '';
+      const problem = t.problem ? ' (total blank: ' + t.problem + ')' : '';
+      if (t.type === 'ratio' || t.type === 'diff') return t.text + problem;
+      if (t.type === 'avg' || t.type === 'min' || t.type === 'max') return 'Totals as the ' + { avg: 'average', min: 'minimum', max: 'maximum' }[t.type];
+      if (t.type === 'none') return 'No total';
+      return '';
+    }
+
     renderHead() {
       const { cols, totals } = this.view;
       this.grid.style.setProperty('--cols', this.template());
@@ -1048,10 +1066,12 @@
         const si = sorts.findIndex(s => s.key === c.key);
         const sort = sorts[si];
         const arrow = sort ? (sort.dir === 'desc' ? ' ▼' : ' ▲') + (sorts.length > 1 ? `<span class="tp-sn">${si + 1}</span>` : '') : '';
-        const sortTip = (sort ? '\nSorted ' + (c.isNum ? (sort.dir === 'desc' ? 'largest to smallest' : 'smallest to largest') : (sort.dir === 'desc' ? 'Z to A' : 'A to Z')) + (sorts.length > 1 ? ' (sort ' + (si + 1) + ' of ' + sorts.length + ')' : '') : '') +
-          '\nShift-click to sort by more than one column';
+        const sortTip = c.vkind === 'run' ? '\nFollows the row order' : sort
+          ? '\nSorted ' + (c.isNum ? (sort.dir === 'desc' ? 'largest to smallest' : 'smallest to largest') : (sort.dir === 'desc' ? 'Z to A' : 'A to Z')) + (sorts.length > 1 ? ' (sort ' + (si + 1) + ' of ' + sorts.length + ')' : '') + ' · Shift-click to add a sort'
+          : '\nClick to sort';
+        const how = this.formulaLine(c);
         const p = this.paramFor(c);
-        h += `<div ${this.cellAttrs(c, 'tp-h')} data-i="${i}" title="${esc(c.label + (p ? '  (from parameter ' + p.name + ')' : '') + (c.label !== c.name && !c.virtual ? '\nField: ' + c.name : '') + sortTip + this.cfDescribe(c))}">` +
+        h += `<div ${this.cellAttrs(c, 'tp-h')} data-i="${i}" title="${esc(c.label + (p && this.authoring ? ' (from parameter ' + p.name + ')' : '') + (how ? '\n' + how : '') + sortTip)}">` +
           `<span class="tp-hl">${esc(c.label)}${arrow}</span>` +
           `<button class="tp-hm" type="button" data-i="${i}" aria-label="Column menu for ${esc(c.label)}">▾</button>` +
           (canEdit ? `<span class="tp-rz" data-i="${i}"></span>` : '') + '</div>';
@@ -1156,6 +1176,9 @@
           h += `<div ${this.cellAttrs(cols[j], (v == null ? 'nul' : '') + (inRange ? ' rg' : '') + (f ? ' cf' : '') + (reds[j] ? this.negCls(cols[j], st.raw[cols[j].key][d]) : ''), f && f.style)} data-c="${j}">${inner}</div>`;
         }
         h += '</div>';
+      }
+      if (!total && this.store.complete) {
+        h = `<div class="tp-empty">${this.store.n ? 'No rows match these filters. <button type="button" data-a="clear-filters">Clear filters</button>' : 'No rows to show.'}</div>`;
       }
       this.rowsEl.innerHTML = h;
     }
@@ -1423,6 +1446,7 @@
         this.clickRow(ds.r, e.ctrlKey || e.metaKey, { x: e.clientX, y: e.clientY });
       });
       this.rowsEl.addEventListener('mouseleave', () => this.unhover());
+      this.rowsEl.addEventListener('click', e => { if (e.target.closest('button[data-a="clear-filters"]')) this.clearFilters(); });
       // Right-click copy: Tableau Desktop keeps Ctrl+C for itself, so this is the reliable way to copy.
       this.rowsEl.addEventListener('contextmenu', e => {
         e.preventDefault();
@@ -1487,6 +1511,14 @@
       if (mode === 'keep') { f.keep = pick.values.slice(); delete f.exclude; }
       else f.exclude = Array.from(new Set((f.exclude || []).concat(pick.values)));
       this.range = null;
+      this.refresh();
+    }
+
+    // Clears every table-only filter: the filter row, search, and Keep only / Exclude.
+    clearFilters() {
+      this.filters = {};
+      this.search = '';
+      this.searchEl.value = '';
       this.refresh();
     }
 
@@ -1857,7 +1889,13 @@
         }
       }
       items.push('-', ['stats', 'Column stats…']);
-      if (c.isNum && c.total) items.push('-', ['info', 'Total: ' + c.total.text + (c.total.problem ? ' (' + c.total.problem + ')' : ''), true]);
+      const infos = [];
+      if (c.isNum && c.total) infos.push(['info', 'Total: ' + c.total.text + (c.total.problem ? ' (' + c.total.problem + ')' : ''), true]);
+      const cfText = this.cfDescribe(c).trim();
+      if (cfText) infos.push(['info', cfText, true]);
+      // Field and parameter names are how the dashboard is built; only authors see them.
+      if (this.authoring && !c.virtual && c.label !== c.name) infos.push(['info', 'Field: ' + c.name, true]);
+      if (infos.length) items.push('-', ...infos);
       if (this.authoring) items.push(['format', 'Format table…']);
       const html = '<div class="tp-menu" role="menu">' + items.filter(Boolean).map(it => it === '-' ? '<hr>' :
         `<button type="button" role="menuitem" data-a="${it[0]}"${it[2] ? ' disabled' : ''}>${esc(it[1])}</button>`).join('') + '</div>';
@@ -2109,7 +2147,8 @@
     openColumnsPicker(anchor) {
       const hidden = new Set(this.layout.hidden || []);
       const keys = this.orderedKeys();
-      const html = '<div class="tp-menu tp-picker"><div class="tp-ph">Show and hide columns</div>' + keys.map(k => {
+      // Columns hidden because their parameter is set to "(none)" aren't listed for viewers at all.
+      const html = '<div class="tp-menu tp-picker"><div class="tp-ph">Show and hide columns</div>' + keys.filter(k => this.authoring || !this.autoHidden(this.colDef(k))).map(k => {
         const c = this.colDef(k);
         const auto = this.autoHidden(c);
         return `<label${auto ? ' class="muted" title="Hidden because its parameter is set to none"' : ''}><input type="checkbox" data-k="${esc(k)}"${!hidden.has(k) ? ' checked' : ''}${auto ? ' disabled' : ''}> ${esc(this.labelFor(c))}</label>`;

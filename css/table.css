@@ -149,3 +149,5 @@ button, input, select { font: inherit; color: inherit; }
 .tp-lnote { font-size: 11px; color: var(--tp-muted); padding: 6px 10px 4px; white-space: normal; line-height: 1.4; }
 .tp-menu .tp-lnote button.linkish { display: inline; padding: 0; border-radius: 0; color: var(--tp-accent); text-decoration: underline; white-space: normal; font-size: inherit; }
 .tp-menu .tp-lnote button.linkish:hover { background: none; }
+.tp-empty { position: sticky; left: 0; padding: 16px 12px; color: var(--tp-muted); white-space: nowrap; }
+.tp-empty button { margin-left: 6px; border: 1px solid var(--tp-line-strong); background: #fff; border-radius: 4px; padding: 2px 8px; cursor: pointer; color: var(--tp-accent); }
