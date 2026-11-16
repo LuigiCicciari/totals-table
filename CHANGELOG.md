@@ -2,6 +2,11 @@
 
 All notable changes to Totals Table. Versions follow [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH, where a patch fixes bugs, a minor version adds features without breaking anything, and a major version changes something existing (read its notes before updating). The version in use shows when hovering the info icon in the table's toolbar.
 
+## 1.3.5 (2026-11-16)
+
+**Changed**
+- The freeze line shows a hand cursor (closing while you drag it), so it reads as something to move rather than a column edge to stretch.
+
 ## 1.3.4 (2026-11-16)
 
 **Fixed**

@@ -10,7 +10,7 @@
   const MAX_LEVELS = 3;
   const NUL = '\u0000null';
   // Semantic version (MAJOR.MINOR.PATCH); see CHANGELOG.md. The ?v= tags in the HTML are only for browser caches.
-  const VERSION = '1.3.4';
+  const VERSION = '1.3.5';
   const calcKey = d => d.kind === 'rank' ? '__rank:' + (d.dir || 'desc') + ':' + d.src : d.kind === 'run' ? '__run:' + d.src : '__' + d.kind + ':' + d.src + '|' + d.other;
 
   function defaults() {
@@ -1560,6 +1560,8 @@
       guide.className = 'tp-guide';
       guide.style.left = bounds[n] + 'px';
       this.grid.appendChild(guide);
+      // The hand closes while the freeze line is being moved.
+      this.grid.classList.add('tp-dragging');
       const move = ev => {
         const x = ev.clientX - gridLeft;
         let best = 0;
@@ -1571,6 +1573,7 @@
         window.removeEventListener('mousemove', move);
         window.removeEventListener('mouseup', up);
         guide.remove();
+        this.grid.classList.remove('tp-dragging');
         if (n !== n0) this.updateLayout({ freeze: n });
       };
       window.addEventListener('mousemove', move);
