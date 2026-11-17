@@ -40,7 +40,7 @@
   }
 
   // Text starting with = + - @ would run as a formula when the CSV is opened in Excel; a leading apostrophe stops that.
-  function noFormula(s) { return /^[=+\-@\t\r]/.test(s) ? "'" + s : s; }
+  function noFormula(s) { return /^\s*[=+\-@]/.test(s) || /^[\t\r]/.test(s) ? "'" + s : s; }
 
   function csvEscape(s) { return /[",\r\n]/.test(s) || /^\s|\s$/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
 

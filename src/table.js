@@ -10,7 +10,7 @@
   const MAX_LEVELS = 3;
   const NUL = '\u0000null';
   // Semantic version (MAJOR.MINOR.PATCH); see CHANGELOG.md. The ?v= tags in the HTML are only for browser caches.
-  const VERSION = '1.6.1';
+  const VERSION = '1.6.2';
   const calcKey = d => d.kind === 'rank' ? '__rank:' + (d.dir || 'desc') + ':' + d.src : d.kind === 'run' || d.kind === 'pgrp' ? '__' + d.kind + ':' + d.src : '__' + d.kind + ':' + d.src + '|' + d.other;
 
   function defaults() {
@@ -1348,7 +1348,7 @@
           const text = loading ? '…' : v == null ? '' : R.formatNumber(v, c.spec);
           // Which rule produced a total, and why one is blank, are author notes.
           const title = !c.total ? '' : !this.authoring ? (c.total.problem ? '' : c.total.text)
-            : c.total.text + (c.total.problem ? ': ' + c.total.problem : '') + (c.total.source === 'override' ? ' (set for this column)' : c.total.source === 'rule' ? ' (' + c.total.label + ')' : '');
+            : c.total.text + (c.total.problem ? ': ' + c.total.problem : '') + (c.total.note ? '. ' + c.total.note : '') + (c.total.source === 'override' ? ' (set for this column)' : c.total.source === 'rule' ? ' (' + c.total.label + ')' : '');
           const f = loading ? null : this.cellFormat(c, v, true);
           h += `<div ${this.cellAttrs(c, (c.total && c.total.problem ? 'warn' : '') + (f ? ' cf' : '') + (loading ? '' : this.negCls(c, v)), f && f.style)} title="${esc(title)}">${this.cfInner(f, esc(text))}</div>`;
         } else {
@@ -1921,7 +1921,7 @@
       const lines = [];
       const headers = mode === 'headers' || mode === 'all' || (mode !== 'cells' && (rows.length > 1 || c1 > c0));
       // Text that starts like a formula gets a leading apostrophe, so pasting into a spreadsheet can't run it.
-      const safe = t => /^[=+\-@]/.test(t) ? "'" + t : t;
+      const safe = t => /^\s*[=+\-@]/.test(t) ? "'" + t : t;
       if (headers) lines.push(cols.slice(c0, c1 + 1).map(c => safe(String(c.label).replace(/[\t\r\n]+/g, ' '))).join('\t'));
       for (const r of rows) {
         const d = typeof r === 'object' ? r.i : disp[r];

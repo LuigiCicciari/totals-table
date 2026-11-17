@@ -2,6 +2,14 @@
 
 All notable changes to Totals Table. Versions follow [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH, where a patch fixes bugs, a minor version adds features without breaking anything, and a major version changes something existing (read its notes before updating). The version in use shows when hovering the info icon in the table's toolbar.
 
+## 1.6.2 (2026-11-17)
+
+**Fixed**
+- Ratio totals set in Format now use exactly the columns picked. Before, when two number columns shared a name (for example SUM(Sales) and AVG(Sales), which both show as Sales), the total could quietly use the other one. Choices already saved in workbooks keep working and now resolve correctly.
+- Ratio rules only match number columns, so a text column with the same name is never used as a numerator or denominator. When a rule's name matches more than one number column, the first is still used and authors see a note in the total's tooltip and in Format saying so. Viewers don't see the note.
+- In Format, the numerator and denominator lists show the full field (SUM(Sales), AVG(Sales)) when number columns share a name, so they can be told apart.
+- CSV downloads and copied cells: text that starts with spaces or tabs before =, +, - or @ also gets a leading apostrophe. Number columns are unchanged.
+
 ## 1.6.1 (2026-11-17)
 
 **Fixed**

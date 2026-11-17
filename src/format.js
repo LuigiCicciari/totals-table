@@ -82,11 +82,17 @@
     if (!c.isNum) return '<span class="src">Text column, no total</span>';
     const t = R.resolveTotal(c, cols, rulesDoc(), cfg.totalOverrides[c.key]);
     const src = t.source === 'override' ? 'set here' : t.source === 'rule' ? t.label : 'default';
-    return esc(R.describeTotal(t, cols)) + ' <span class="src">(' + esc(src) + ')</span>' + (t.problem ? '<div class="prob">' + esc(t.problem) + '</div>' : '');
+    const named = cols.map(x => ({ key: x.key, name: pickName(x) }));
+    return esc(R.describeTotal(t, named)) + ' <span class="src">(' + esc(src) + ')</span>' + (t.problem || t.note ? '<div class="prob">' + esc(t.problem || t.note) + '</div>' : '');
+  }
+
+  // Number columns that share a name (SUM(Sales) and AVG(Sales) both show as Sales) are told apart by their field.
+  function pickName(c) {
+    return c.isNum && cols.filter(x => x.isNum && x.name.toLowerCase() === c.name.toLowerCase()).length > 1 ? c.key : c.name;
   }
 
   function numOptions(selected) {
-    return '<option value="">Choose…</option>' + cols.filter(c => c.isNum).map(c => `<option value="${esc(c.key)}"${c.key === selected ? ' selected' : ''}>${esc(c.name)}</option>`).join('');
+    return '<option value="">Choose…</option>' + cols.filter(c => c.isNum).map(c => `<option value="${esc(c.key)}"${c.key === selected ? ' selected' : ''}>${esc(pickName(c))}</option>`).join('');
   }
 
   // Web-address columns are clickable by default; any text column can link to one of them instead.

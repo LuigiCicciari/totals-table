@@ -77,19 +77,26 @@
   // Works out how one column totals: per-column override first, then the first matching rule, then the default.
   function resolveTotal(col, columns, rulesDoc, override) {
     if (!col.isNum) return { type: 'none', source: 'text' };
-    const fromSpec = (t, source, label) => {
+    // Ratio parts named in a rule only match number columns. Columns picked in Format are used exactly as picked,
+    // since two columns can share a name (SUM(Sales) and AVG(Sales) both show as Sales).
+    const nums = columns.filter(c => c.isNum);
+    const fromSpec = (t, source, label, picked) => {
       if (t.type !== 'ratio') return { type: t.type, source, label };
-      const num = findColumn(t.numerator, columns);
-      const den = findColumn(t.denominator, columns);
+      const num = picked ? picked.num : findColumn(t.numerator, nums);
+      const den = picked ? picked.den : findColumn(t.denominator, nums);
       const out = { type: 'ratio', source, label, numKey: num && num.key, denKey: den && den.key, multiplier: Number(t.multiplier) || 1, numerator: t.numerator, denominator: t.denominator };
       if (!num || !den) out.problem = 'Needs ' + (!num ? '"' + t.numerator + '"' : '') + (!num && !den ? ' and ' : '') + (!den ? '"' + t.denominator + '"' : '') + ' on the Detail shelf';
+      if (!picked) {
+        const shared = [[num, t.numerator], [den, t.denominator]].filter(([c, w]) => c && !eq(c.key, w) && nums.filter(x => eq(x.name, c.name)).length > 1).map(([c]) => c.name);
+        if (shared.length) out.note = 'More than one number column is named "' + shared[0] + '", so the first is used. To choose, set this total in Format.';
+      }
       return out;
     };
     if (override && override.type && override.type !== 'auto') {
       if (override.type === 'ratio') {
-        const num = columns.find(c => c.key === override.numKey);
-        const den = columns.find(c => c.key === override.denKey);
-        return fromSpec({ type: 'ratio', numerator: num ? num.name : override.numKey, denominator: den ? den.name : override.denKey, multiplier: override.multiplier }, 'override');
+        const num = columns.find(c => c.key === override.numKey) || null;
+        const den = columns.find(c => c.key === override.denKey) || null;
+        return fromSpec({ type: 'ratio', numerator: num ? num.name : override.numKey, denominator: den ? den.name : override.denKey, multiplier: override.multiplier }, 'override', undefined, { num, den });
       }
       return { type: override.type, source: 'override' };
     }
