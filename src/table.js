@@ -10,7 +10,7 @@
   const MAX_LEVELS = 3;
   const NUL = '\u0000null';
   // Semantic version (MAJOR.MINOR.PATCH); see CHANGELOG.md. The ?v= tags in the HTML are only for browser caches.
-  const VERSION = '1.6.0';
+  const VERSION = '1.6.1';
   const calcKey = d => d.kind === 'rank' ? '__rank:' + (d.dir || 'desc') + ':' + d.src : d.kind === 'run' || d.kind === 'pgrp' ? '__' + d.kind + ':' + d.src : '__' + d.kind + ':' + d.src + '|' + d.other;
 
   function defaults() {
@@ -56,7 +56,10 @@
     out.export = Object.assign(defaults().export, saved.export);
     out.lastRows = Object.assign(defaults().lastRows, saved.lastRows);
     out.sharedLayouts = Array.isArray(saved.sharedLayouts) ? saved.sharedLayouts.filter(x => x && typeof x.name === 'string' && x.name.trim()).map(cleanEntry) : [];
-    out.layout = Object.assign(defaults().layout, saved.layout);
+    // Settings come from the workbook; keep only well-formed layout values and real hex colors.
+    const lay = saved.layout && typeof saved.layout === 'object' ? saved.layout : {};
+    out.layout = Object.assign(defaults().layout, cleanLayout(lay));
+    if (Array.isArray(lay.collapseLevels)) out.layout.collapseLevels = lay.collapseLevels.filter(x => typeof x === 'string');
     out.headerLinks = saved.headerLinks || {};
     out.totalOverrides = saved.totalOverrides || {};
     out.links = saved.links || {};
@@ -65,6 +68,9 @@
     out.colFormat = saved.colFormat || {};
     out.hideWhen = saved.hideWhen || {};
     out.style = Object.assign(defaults().style, saved.style);
+    for (const k of Object.keys(out.style)) {
+      if (typeof defaults().style[k] === 'string' && /^#/.test(defaults().style[k]) && !/^#[0-9a-f]{6}$/i.test(String(out.style[k]))) out.style[k] = defaults().style[k];
+    }
     return out;
   }
 
@@ -406,7 +412,7 @@
       if (!this.cfg.viewerWeights || c.virtual) return null;
       const k = this.layout.weights && this.layout.weights[c.key];
       const w = k && k !== c.key && this.colDef(k);
-      return w && w.isNum && !w.virtual ? k : null;
+      return w && w.isNum && !w.virtual && !this.autoHidden(w) ? k : null;
     }
 
     // Sorts are a list of { key, dir }, first one wins; older layouts stored a single object.
@@ -522,6 +528,13 @@
       if (c.isUrl) return l.mode === 'off' ? null : { urlKey: c.key, label: l.label || '' };
       if (l.linkTo && this.colDef(l.linkTo)) return { urlKey: l.linkTo, label: '' };
       return null;
+    }
+
+    // The text a cell shows: a link's label when one is set, otherwise the value.
+    shownText(c, i) {
+      const l = this.linkFor(c);
+      if (l && l.label && this.safeUrl(this.store.fmt[l.urlKey][i])) return l.label;
+      return this.store.fmt[c.key][i];
     }
 
     paramFor(col) {
@@ -704,8 +717,12 @@
       }
       if (this.search) {
         const q = this.search.toLowerCase();
-        const fmts = cols.filter(c => !c.virtual).map(c => st.fmt[c.key]);
-        tests.push(i => fmts.some(f => f[i] != null && f[i].toLowerCase().indexOf(q) >= 0));
+        // Matches what each cell shows, so a link labeled "View" isn't found by its hidden address.
+        const shown = cols.filter(c => !c.virtual).map(c => {
+          const l = this.linkFor(c);
+          return l && l.label ? i => this.shownText(c, i) : (f => i => f[i])(st.fmt[c.key]);
+        });
+        tests.push(i => shown.some(get => { const v = get(i); return v != null && v.toLowerCase().indexOf(q) >= 0; }));
       }
       const idx = [];
       outer: for (let i = 0; i < n; i++) {
@@ -1331,7 +1348,7 @@
           const text = loading ? '…' : v == null ? '' : R.formatNumber(v, c.spec);
           // Which rule produced a total, and why one is blank, are author notes.
           const title = !c.total ? '' : !this.authoring ? (c.total.problem ? '' : c.total.text)
-            : c.total.text + (c.total.problem ? ' — ' + c.total.problem : '') + (c.total.source === 'override' ? ' (set for this column)' : c.total.source === 'rule' ? ' (' + c.total.label + ')' : '');
+            : c.total.text + (c.total.problem ? ': ' + c.total.problem : '') + (c.total.source === 'override' ? ' (set for this column)' : c.total.source === 'rule' ? ' (' + c.total.label + ')' : '');
           const f = loading ? null : this.cellFormat(c, v, true);
           h += `<div ${this.cellAttrs(c, (c.total && c.total.problem ? 'warn' : '') + (f ? ' cf' : '') + (loading ? '' : this.negCls(c, v)), f && f.style)} title="${esc(title)}">${this.cfInner(f, esc(text))}</div>`;
         } else {
@@ -1396,7 +1413,7 @@
           let inner = v == null ? nulls[j] : this.cfInner(f, mark(j, v));
           const lk = links[j];
           const url = lk && this.safeUrl(lk.urls[d]);
-          if (url && (v != null || lk.label)) inner = `<a class="tp-link" href="${esc(url)}" target="_blank" rel="noopener noreferrer" title="${esc(url)}">${esc(lk.label || v)}</a>`;
+          if (url && (v != null || lk.label)) inner = `<a class="tp-link" href="${esc(url)}" target="_blank" rel="noopener noreferrer" title="${esc(url)}">${mark(j, lk.label || v)}</a>`;
           h += `<div ${this.cellAttrs(cols[j], (v == null ? 'nul' : '') + (inRange ? ' rg' : '') + (f ? ' cf' : '') + (reds[j] ? this.negCls(cols[j], st.raw[cols[j].key][d]) : ''), f && f.style)} data-c="${j}">${inner}</div>`;
         }
         h += '</div>';
@@ -1615,14 +1632,13 @@
       const c = this.view.cols[i];
       if (!c || !this.canEditLayout()) return;
       const ctx = (this.measureCtx = this.measureCtx || document.createElement('canvas').getContext('2d'));
-      const font = getComputedStyle(this.el).font || '12px sans-serif';
-      ctx.font = font;
+      const fontOf = (el, weight) => { const cs = getComputedStyle(el); return (weight || cs.fontWeight) + ' ' + cs.fontSize + ' ' + cs.fontFamily; };
+      ctx.font = fontOf(this.el);
       const width = t => t ? ctx.measureText(String(t)).width : 0;
-      const fmt = this.store.fmt[c.key];
       let w = 0;
       const rows = this.view.idx;
-      for (let k = 0; k < rows.length && k < 5000; k++) { const v = fmt[rows[k]]; w = Math.max(w, width(v == null ? this.nullFor(c) : v)); }
-      ctx.font = 'bold ' + font;
+      for (let k = 0; k < rows.length && k < 5000; k++) { const v = this.shownText(c, rows[k]); w = Math.max(w, width(v == null ? this.nullFor(c) : v)); }
+      ctx.font = fontOf(this.el, 700);
       const tot = this.view.totals && this.view.totals[c.key];
       if (tot != null) w = Math.max(w, width(R.formatNumber(tot, c.spec)));
       for (const d of this.view.disp) {
@@ -1631,7 +1647,9 @@
         else if (c.isNum && d.totals[c.key] != null) w = Math.max(w, width(R.formatNumber(d.totals[c.key], c.spec)));
       }
       const hc = this.head.querySelector(`.tp-h[data-i="${i}"]`), hl = hc && hc.querySelector('.tp-hl');
-      const head = hl ? hl.scrollWidth + (hc.offsetWidth - hl.clientWidth) + 2 : width(c.label) + 40;
+      // The label stretches to fill the header, so its text is measured rather than the element.
+      if (hl) ctx.font = fontOf(hl);
+      const head = hl ? Math.ceil(width(hl.textContent)) + (hc.offsetWidth - hl.clientWidth) + 2 : width(c.label) + 40;
       const nw = Math.round(Math.max(MIN_W, Math.min(600, Math.max(w + 18, head))));
       if (nw !== c.w) this.updateLayout({ widths: Object.assign({}, this.layout.widths, { [c.key]: nw }) });
     }
@@ -1902,7 +1920,9 @@
       if (!rows.length) return '';
       const lines = [];
       const headers = mode === 'headers' || mode === 'all' || (mode !== 'cells' && (rows.length > 1 || c1 > c0));
-      if (headers) lines.push(cols.slice(c0, c1 + 1).map(c => c.label).join('\t'));
+      // Text that starts like a formula gets a leading apostrophe, so pasting into a spreadsheet can't run it.
+      const safe = t => /^[=+\-@]/.test(t) ? "'" + t : t;
+      if (headers) lines.push(cols.slice(c0, c1 + 1).map(c => safe(String(c.label).replace(/[\t\r\n]+/g, ' '))).join('\t'));
       for (const r of rows) {
         const d = typeof r === 'object' ? r.i : disp[r];
         if (d && typeof d === 'object') {
@@ -1910,14 +1930,19 @@
           for (let j = c0; j <= c1; j++) {
             const c = cols[j];
             const v = c.key === d.colKey ? d.label + (d.isOther ? ' (' + d.rows.length + ')' : '') : c.isNum && d.totals[c.key] != null ? R.formatNumber(d.totals[c.key], c.spec) : '';
-            vals.push(String(v).replace(/[\t\r\n]+/g, ' '));
+            const t = String(v).replace(/[\t\r\n]+/g, ' ');
+            vals.push(c.key === d.colKey ? safe(t) : t);
           }
           lines.push(vals.join('\t'));
           continue;
         }
         if (typeof d !== 'number') continue;
         const vals = [];
-        for (let j = c0; j <= c1; j++) { const v = st.fmt[cols[j].key][d]; vals.push(v == null ? '' : v.replace(/[\t\r\n]+/g, ' ')); }
+        for (let j = c0; j <= c1; j++) {
+          const v = st.fmt[cols[j].key][d];
+          const t = v == null ? '' : v.replace(/[\t\r\n]+/g, ' ');
+          vals.push(cols[j].isNum ? t : safe(t));
+        }
         lines.push(vals.join('\t'));
       }
       return lines.join('\n');

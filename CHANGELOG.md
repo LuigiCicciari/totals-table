@@ -2,6 +2,16 @@
 
 All notable changes to Totals Table. Versions follow [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH, where a patch fixes bugs, a minor version adds features without breaking anything, and a major version changes something existing (read its notes before updating). The version in use shows when hovering the info icon in the table's toolbar.
 
+## 1.6.1 (2026-11-17)
+
+**Fixed**
+- Double-clicking a column edge now shrinks a column that is wider than it needs to be, and repeated double-clicks no longer widen it. Link columns fit their link text instead of the web address behind it.
+- Search matches what cells show: a link labeled "View" is no longer found by its hidden address, and matches inside link text are highlighted.
+- A weighted average whose weight column is hidden goes back to the normal total, instead of naming the hidden column.
+- Copying cells: text that starts like a spreadsheet formula (=, +, - or @) gets a leading apostrophe, so pasting into Excel can't run it. Number columns are copied as before.
+- Table settings saved in the workbook are checked when the table loads: colors must be real hex colors, and layout values must be well-formed.
+- A blank-total explanation in a header tooltip uses a colon instead of a dash.
+
 ## 1.6.0 (2026-11-17)
 
 **Added**
