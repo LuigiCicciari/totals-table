@@ -2,6 +2,13 @@
 
 All notable changes to Totals Table. Versions follow [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH, where a patch fixes bugs, a minor version adds features without breaking anything, and a major version changes something existing (read its notes before updating). The version in use shows when hovering the info icon in the table's toolbar.
 
+## 1.5.0 (2026-11-16)
+
+**Added**
+- Shared layouts: while editing, authors can save named layouts in the workbook from the Layouts button. Every viewer finds them in the Layouts menu under Shared, above their own layouts, and can switch to them or save their own copy. Authors can update, rename, delete, export and import them; viewers can't change them.
+- Collapsed groups are remembered. What a viewer leaves collapsed stays that way on their next visit, without counting as a layout change. Saved and shared layouts keep their collapsed groups, and a level collapsed as a whole also collapses groups that appear in new data. "Update" is always offered for the layout in use, so its current view can be saved at any time.
+- Authors can tick "Viewers start with this level collapsed" in a subtotal column's menu to set the starting view for everyone. Collapsing while editing no longer changes what viewers see by accident.
+
 ## 1.4.2 (2026-11-16)
 
 **Fixed**

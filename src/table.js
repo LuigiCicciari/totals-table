@@ -10,7 +10,7 @@
   const MAX_LEVELS = 3;
   const NUL = '\u0000null';
   // Semantic version (MAJOR.MINOR.PATCH); see CHANGELOG.md. The ?v= tags in the HTML are only for browser caches.
-  const VERSION = '1.4.2';
+  const VERSION = '1.5.0';
   const calcKey = d => d.kind === 'rank' ? '__rank:' + (d.dir || 'desc') + ':' + d.src : d.kind === 'run' ? '__run:' + d.src : '__' + d.kind + ':' + d.src + '|' + d.other;
 
   function defaults() {
@@ -31,6 +31,8 @@
       export: { formats: 'excel', excelTotals: true, subtotals: true, filename: '{sheet} {date}' },
       // Catch-all values such as "Other" that sort after everything else in their column in the default order.
       lastRows: { values: '', always: false },
+      // Layouts an author saves in the workbook for every viewer.
+      sharedLayouts: [],
       links: {},
       cf: {},
       colGroups: {},
@@ -39,7 +41,7 @@
       hideWhen: {},
       // Whole-table look. The defaults are the original design, so nothing changes until an author sets something.
       style: { size: 'normal', density: 'normal', text: '#1f2328', headBg: '#f6f8fa', headText: '#1f2328', headBold: true, headWrap: false, lines: 'both', banding: true, totBg: '#fbfbfc', totBold: true, subBg: '#f3f5f8', subBold: true, neg: '', accent: '#1f6feb' },
-      layout: { order: [], hidden: [], widths: {}, labels: {}, freeze: 'auto', sort: null, groupBy: null, pct: [], calc: [], cfOff: [], hideGroups: false, topN: null }
+      layout: { order: [], hidden: [], widths: {}, labels: {}, freeze: 'auto', sort: null, groupBy: null, pct: [], calc: [], cfOff: [], hideGroups: false, topN: null, collapseLevels: [] }
     };
   }
 
@@ -51,6 +53,7 @@
     out.totals = Object.assign(defaults().totals, saved.totals);
     out.export = Object.assign(defaults().export, saved.export);
     out.lastRows = Object.assign(defaults().lastRows, saved.lastRows);
+    out.sharedLayouts = Array.isArray(saved.sharedLayouts) ? saved.sharedLayouts.filter(x => x && typeof x.name === 'string' && x.name.trim()).map(cleanEntry) : [];
     out.layout = Object.assign(defaults().layout, saved.layout);
     out.headerLinks = saved.headerLinks || {};
     out.totalOverrides = saved.totalOverrides || {};
@@ -93,7 +96,7 @@
       this.local = null;
       this.filters = {};
       this.search = '';
-      this.collapsed = new Set();
+      this.collapse = { levels: new Set(), open: new Set(), closed: new Set() };
       this.otherOpen = new Set();
       this.selected = new Set();
       this.range = null;
@@ -267,6 +270,7 @@
         // Without browser storage, layouts live only in memory, so they aren't reloaded (and wiped) on every
         // data refresh.
         if (first && (!this.layoutLoaded || this.storageOk !== false)) { this.loadLocalLayout(); this.loadPresets(); this.layoutLoaded = true; }
+        if (!this.collapseReady) { this.collapse = this.loadCollapse(); this.collapseReady = true; }
         this.refresh();
         if (done) this.setStatus(null);
       })).catch(e => {
@@ -373,6 +377,8 @@
 
     resetLocal() {
       this.local = null;
+      this.collapse = this.defaultCollapse();
+      try { localStorage.removeItem(this.collapseKey()); } catch (e) { /* storage blocked */ }
       if (this.presets && this.presets.active) { this.presets.active = null; this.savePresets(); }
       try { localStorage.removeItem(this.layoutKey()); } catch (e) { /* storage blocked */ }
       this.refresh();
@@ -875,7 +881,7 @@
       const walk = list => {
         for (const g of list) {
           disp.push(g);
-          if (this.collapsed.has(g.key)) continue;
+          if (this.isCollapsed(g)) continue;
           if (g.children) walk(g.children);
           else this.emitTop(disp, g.top, g.rows);
         }
@@ -1070,8 +1076,9 @@
       q('.tp-cols').hidden = !this.canEditLayout();
       const chip = q('.tp-lchip');
       const act = this.presets && this.activePreset();
-      q('.tp-lay').hidden = this.authoring || !this.cfg.allowViewerLayout || !this.presets;
-      if (act && !this.authoring) {
+      q('.tp-lay').hidden = !this.presets || !(this.authoring || this.cfg.allowViewerLayout);
+      q('.tp-lay').title = this.authoring ? 'Shared layouts' : 'Layouts';
+      if (act) {
         chip.hidden = false;
         chip.dataset.mode = 'menu';
         chip.textContent = 'Layout: ' + act.name + (this.presetEdited(act) ? ' (edited)' : '');
@@ -1330,7 +1337,7 @@
       for (let r = start; r < end; r++) {
         const d = disp[r];
         if (typeof d === 'object') {
-          const open = d.isOther ? this.otherOpen.has(d.key) : !this.collapsed.has(d.key);
+          const open = d.isOther ? this.otherOpen.has(d.key) : !this.isCollapsed(d);
           h += `<div class="tp-row tp-grp l${d.level}${d.isOther ? ' tp-other' : ''}" data-r="${r}">`;
           cols.forEach((c, j) => {
             if (c.key === d.colKey) h += `<div ${this.cellAttrs(c)} data-c="${j}"><span class="tp-caret">${open ? '▾' : '▸'}</span>${esc(d.label)} <span class="tp-cnt">(${d.rows.length.toLocaleString()})</span></div>`;
@@ -1754,8 +1761,8 @@
     clickRow(r, toggle, point) {
       const d = this.view.disp[r];
       if (typeof d === 'object') {
-        const set = d.isOther ? this.otherOpen : this.collapsed;
-        if (set.has(d.key)) set.delete(d.key); else set.add(d.key);
+        if (d.isOther) { if (this.otherOpen.has(d.key)) this.otherOpen.delete(d.key); else this.otherOpen.add(d.key); }
+        else this.toggleGroup(d);
         this.computeView();
         this.renderBody(true);
         return;
@@ -1817,7 +1824,7 @@
         const all = [];
         for (const d of disp) {
           if (typeof d === 'number') all.push(d);
-          else if (d.isOther ? !this.otherOpen.has(d.key) : this.collapsed.has(d.key)) all.push(...(d.isOther ? d.rows : this.orderedRows([d])));
+          else if (d.isOther ? !this.otherOpen.has(d.key) : this.isCollapsed(d)) all.push(...(d.isOther ? d.rows : this.orderedRows([d])));
         }
         rows = all.map(i => ({ i }));
       } else if (rg && !(rg.r0 === rg.r1 && rg.c0 === rg.c1 && this.selected.size > 1)) {
@@ -1886,32 +1893,55 @@
 
     // Named layouts a viewer saves in their own browser, per worksheet and field list, like the working layout.
     presetKey() { return this.layoutKey().replace('tp-layout:', 'tp-presets:'); }
+    collapseKey() { return this.layoutKey().replace('tp-layout:', 'tp-collapse:'); }
 
     loadPresets() {
-      this.presets = { list: [], active: null };
+      const prev = this.presets;
+      this.presets = { list: [], active: null, kind: 'mine' };
       this.storageOk = true;
       try { localStorage.setItem('tp-test', '1'); localStorage.removeItem('tp-test'); } catch (e) { this.storageOk = false; }
-      if (this.authoring || !this.cfg.allowViewerLayout) return;
+      // Authors work with the shared layouts saved in the workbook; the one in use survives data refreshes.
+      if (this.authoring) { if (prev && prev.kind === 'shared') { this.presets.active = prev.active; this.presets.kind = 'shared'; } return; }
+      if (!this.cfg.allowViewerLayout) return;
       try {
         const p = JSON.parse(localStorage.getItem(this.presetKey()) || 'null');
         if (p && Array.isArray(p.list)) {
-          const list = p.list.filter(x => x && typeof x.name === 'string' && x.name.trim()).map(x => ({ name: x.name, layout: cleanLayout(x.layout), params: cleanParams(x.params), savedAt: x.savedAt }));
-          this.presets = { list, active: list.some(x => x.name === p.active) ? p.active : null };
+          const list = p.list.filter(x => x && typeof x.name === 'string' && x.name.trim()).map(cleanEntry);
+          const kind = p.kind === 'shared' ? 'shared' : 'mine';
+          const pool = kind === 'shared' ? this.sharedList() : list;
+          this.presets = { list, active: pool.some(x => x.name === p.active) ? p.active : null, kind };
         }
       } catch (e) { /* keep empty */ }
     }
 
     // Presets stay in memory for the session even when the browser won't store them.
     savePresets() {
+      if (this.authoring) return true;
       try { localStorage.setItem(this.presetKey(), JSON.stringify(this.presets)); return true; } catch (e) { return false; }
     }
 
-    activePreset() { return this.presets && this.presets.active ? this.presets.list.find(p => p.name === this.presets.active) || null : null; }
+    // Layouts an author saved in the workbook for everyone.
+    sharedList() { return this.cfg.sharedLayouts || []; }
 
-    // A layout is edited when its arrangement or any of its saved column parameters has changed.
+    activePreset() {
+      if (!this.presets || !this.presets.active) return null;
+      const pool = this.presets.kind === 'shared' ? this.sharedList() : this.presets.list;
+      return pool.find(p => p.name === this.presets.active) || null;
+    }
+
+    // The arrangement that is compared and saved: the workbook's own for authors, the viewer's own for viewers.
+    currentLayout() {
+      if (!this.authoring) return this.local || {};
+      const l = Object.assign({}, this.cfg.layout);
+      delete l.collapseLevels;
+      return l;
+    }
+
+    // A layout is edited when its arrangement or any of its saved column parameters has changed. Opening and
+    // closing groups is not an edit; it is saved only when someone chooses Update or Save.
     presetEdited(p) {
       if (this.restoring) return false;
-      if (normLayout(this.local) !== normLayout(p.layout)) return true;
+      if (normLayout(this.currentLayout()) !== normLayout(p.layout)) return true;
       const cur = this.captureParams();
       const saved = p.params || {};
       // A layout saved without a column setting (for example before layouts kept them) counts as edited,
@@ -1970,13 +2000,89 @@
       } catch (e) { /* storage blocked */ }
     }
 
-    applyPreset(name) {
-      const p = this.presets.list.find(x => x.name === name);
+    // ---------- collapsed groups ----------
+
+    // Collapse state is whole levels plus exceptions, so groups that appear in new data follow their level.
+    emptyCollapse() { return { levels: new Set(), open: new Set(), closed: new Set() }; }
+
+    // What an author ticked as "Viewers start with this level collapsed".
+    defaultCollapse() {
+      const s = this.emptyCollapse();
+      for (const k of this.cfg.layout.collapseLevels || []) s.levels.add(k);
+      return s;
+    }
+
+    collapseFrom(o) {
+      const c = cleanCollapse(o);
+      if (!c) return this.defaultCollapse();
+      return { levels: new Set(c.levels), open: new Set(c.open), closed: new Set(c.closed) };
+    }
+
+    collapseToJSON() {
+      const s = this.collapse;
+      return { levels: Array.from(s.levels), open: Array.from(s.open), closed: Array.from(s.closed) };
+    }
+
+    isCollapsed(g) {
+      const s = this.collapse;
+      return s.closed.has(g.key) || (s.levels.has(g.colKey) && !s.open.has(g.key));
+    }
+
+    // Viewers keep what they leave collapsed across visits, without it counting as a layout change.
+    // Authors' collapsing lasts for the session; the default for viewers is set on purpose from the column menu.
+    persistCollapse() {
+      if (this.authoring || !this.cfg.allowViewerLayout) return;
+      try { localStorage.setItem(this.collapseKey(), JSON.stringify(this.collapseToJSON())); } catch (e) { /* storage blocked */ }
+    }
+
+    loadCollapse() {
+      if (!this.authoring && this.cfg.allowViewerLayout) {
+        try {
+          const o = JSON.parse(localStorage.getItem(this.collapseKey()) || 'null');
+          if (o) return this.collapseFrom(o);
+        } catch (e) { /* use the default */ }
+      }
+      return this.defaultCollapse();
+    }
+
+    toggleGroup(g) {
+      const s = this.collapse;
+      const byLevel = s.levels.has(g.colKey);
+      if (this.isCollapsed(g)) { s.closed.delete(g.key); if (byLevel) s.open.add(g.key); }
+      else { s.open.delete(g.key); if (!byLevel) s.closed.add(g.key); }
+      this.persistCollapse();
+    }
+
+    // Collapse all on a level shows that level's subtotals (opening the levels above it);
+    // Expand all opens that level and everything above it.
+    setLevelCollapsed(level, collapse) {
+      const s = this.collapse;
+      const cols = this.groupCols || [];
+      for (let l = 0; l <= level && l < cols.length; l++) {
+        const key = cols[l].key;
+        for (const g of this.groupsAtLevel(l)) { s.open.delete(g.key); s.closed.delete(g.key); }
+        if (collapse && l === level) s.levels.add(key); else s.levels.delete(key);
+      }
+      this.persistCollapse();
+    }
+
+    // ---------- applying and saving layouts ----------
+
+    applyPreset(name, kind) {
+      kind = kind || 'mine';
+      const pool = kind === 'shared' ? this.sharedList() : this.presets.list;
+      const p = pool.find(x => x.name === name);
       if (!p) return;
-      this.setLocal(p.layout);
+      if (this.authoring) {
+        // For an author, a shared layout becomes the workbook's own arrangement, ready to adjust and update.
+        this.cfg.layout = Object.assign(defaults().layout, JSON.parse(JSON.stringify(p.layout || {})), { collapseLevels: this.cfg.layout.collapseLevels || [] });
+        this.saveConfig();
+      } else this.setLocal(p.layout);
       this.presets.active = name;
+      this.presets.kind = kind;
       this.savePresets();
-      this.collapsed = new Set();
+      this.collapse = p.collapse ? this.collapseFrom(p.collapse) : this.defaultCollapse();
+      this.persistCollapse();
       // While its parameters are being set, the layout isn't shown as edited.
       if (p.params && Object.keys(p.params).length) this.restoring = true;
       this.refresh();
@@ -1984,14 +2090,29 @@
       if (p.params && Object.keys(p.params).length) return this.restoreParams(p.params);
     }
 
+    snapshotEntry(name) {
+      return { name, layout: cleanLayout(JSON.parse(JSON.stringify(this.currentLayout()))), params: this.captureParams(), collapse: this.collapseToJSON(), savedAt: new Date().toISOString() };
+    }
+
     savePresetAs(name) {
       name = String(name || '').trim().slice(0, 60);
       if (!name) return;
-      const layout = JSON.parse(JSON.stringify(this.local || {}));
+      const entry = this.snapshotEntry(name);
+      if (this.authoring) {
+        const list = this.sharedList().slice();
+        const at = list.findIndex(x => x.name === name);
+        if (at >= 0) list[at] = entry; else list.push(entry);
+        this.cfg.sharedLayouts = list;
+        this.presets.active = name;
+        this.presets.kind = 'shared';
+        this.saveConfig();
+        this.refresh();
+        return this.flashOk('Saved shared layout "' + name + '"');
+      }
       const at = this.presets.list.findIndex(x => x.name === name);
-      const entry = { name, layout, params: this.captureParams(), savedAt: new Date().toISOString() };
       if (at >= 0) this.presets.list[at] = entry; else this.presets.list.push(entry);
       this.presets.active = name;
+      this.presets.kind = 'mine';
       this.savePresets();
       this.refresh();
       let tipped = false;
@@ -2001,8 +2122,9 @@
     }
 
     exportList() {
+      if (this.authoring) return this.sharedList();
       if (this.presets.list.length) return this.presets.list;
-      return this.local && Object.keys(this.local).length ? [{ name: 'My layout', layout: this.local }] : [];
+      return this.local && Object.keys(this.local).length ? [{ name: 'My layout', layout: this.local, collapse: this.collapseToJSON() }] : [];
     }
 
     exportPresets() {
@@ -2012,44 +2134,67 @@
       saveBlob(new Blob([JSON.stringify(doc, null, 2)], { type: 'application/json' }), TPExport.buildFileName('Table layouts {sheet}', { sheet: this.ws.name }, 'json'));
     }
 
+    // Viewers import into their own layouts; authors import into the workbook's shared layouts.
     importPresets(text) {
       let doc;
       try { doc = JSON.parse(text); } catch (e) { doc = null; }
       if (!doc || doc.type !== 'totals-table-layouts' || !Array.isArray(doc.layouts)) { this.flash('That file isn\'t a table layouts file.'); return; }
+      const list = this.authoring ? this.sharedList().slice() : this.presets.list;
       let n = 0;
       for (const p of doc.layouts) {
         if (!p || typeof p.name !== 'string' || !p.name.trim() || typeof p.layout !== 'object') continue;
-        const entry = { name: p.name.trim().slice(0, 60), layout: cleanLayout(p.layout), params: cleanParams(p.params), savedAt: typeof p.savedAt === 'string' ? p.savedAt : new Date().toISOString() };
-        const at = this.presets.list.findIndex(x => x.name === entry.name);
-        if (at >= 0) this.presets.list[at] = entry; else this.presets.list.push(entry);
+        const entry = cleanEntry(p);
+        const at = list.findIndex(x => x.name === entry.name);
+        if (at >= 0) list[at] = entry; else list.push(entry);
         n++;
       }
-      this.savePresets();
+      if (this.authoring) { this.cfg.sharedLayouts = list; this.saveConfig(); } else this.savePresets();
       this.refresh();
-      this.note(n + (n === 1 ? ' layout' : ' layouts') + ' restored.', 4000);
+      this.note(n + (n === 1 ? ' layout' : ' layouts') + (this.authoring ? ' added to the shared layouts.' : ' restored.'), 4000);
     }
 
     openPresets(anchor, mode, confirmDelete) {
-      const L = this.presets.list;
+      const author = this.authoring;
+      const shared = this.sharedList();
+      const L = author ? shared : this.presets.list;
       const act = this.activePreset();
+      const kind = this.presets.kind;
+      // The layout this person can change: shared ones for authors, their own for viewers.
+      const own = act && (author ? kind === 'shared' : kind === 'mine') ? act : null;
       const edited = act && this.presetEdited(act);
-      const hasLocal = !!(this.local && Object.keys(this.local).length);
+      const hasLocal = !author && !!(this.local && Object.keys(this.local).length);
       const btn = (a, label, extra) => `<button type="button" data-a="${a}"${extra || ''}>${esc(label)}</button>`;
-      let h = '<div class="tp-menu tp-lays" role="menu"><div class="tp-ph">Layouts</div>';
-      h += btn('pub', (!act && !hasLocal ? '✓ ' : '') + 'Published layout');
-      L.forEach(p => { h += btn('apply', (p === act ? '✓ ' : '') + p.name, ` data-name="${esc(p.name)}"`); });
+      const item = (p, k) => btn('apply', (act === p && kind === k ? '✓ ' : '') + p.name, ` data-name="${esc(p.name)}" data-kind="${k}"`);
+      let h = '<div class="tp-menu tp-lays" role="menu"><div class="tp-ph">' + (author ? 'Shared layouts' : 'Layouts') + '</div>';
+      if (author) {
+        h += '<div class="tp-lnote tp-lnote-top">Saved in this workbook. Everyone who opens the dashboard can choose these from Layouts, above their own.</div>';
+        L.forEach(p => { h += item(p, 'shared'); });
+        if (!L.length) h += '<div class="tp-lnote tp-lnote-top">None yet. Arrange the table, then save it below.</div>';
+      } else {
+        h += btn('pub', (!act && !hasLocal ? '✓ ' : '') + 'Published layout');
+        if (shared.length) {
+          h += '<div class="tp-lsec">Shared</div>';
+          shared.forEach(p => { h += item(p, 'shared'); });
+          if (L.length) h += '<div class="tp-lsec">Yours</div>';
+        }
+        L.forEach(p => { h += item(p, 'mine'); });
+      }
       h += '<hr>';
       if (mode === 'save' || mode === 'rename') {
-        const val = mode === 'rename' && act ? act.name : '';
+        const val = mode === 'rename' && own ? own.name : '';
         h += `<div class="tp-lname"><input type="text" maxlength="60" value="${esc(val)}" placeholder="Layout name" aria-label="Layout name"><button type="button" data-a="${mode}-ok">${mode === 'save' ? 'Save' : 'Rename'}</button></div>`;
-      } else h += btn('save', 'Save current layout as…');
-      if (act && edited) h += btn('update', 'Update "' + act.name + '" with your changes') + btn('undo', 'Undo changes to "' + act.name + '"');
-      if (act && mode !== 'rename') h += btn('rename', 'Rename "' + act.name + '"…') + btn('delete', (confirmDelete ? 'Click again to delete "' : 'Delete "') + act.name + '"');
-      h += '<hr>' + btn('export', 'Export layouts', this.exportList().length ? '' : ' disabled') + btn('import', 'Import layouts…') +
-        '<input type="file" accept=".json,application/json" hidden>';
-      h += '<div class="tp-lnote">' + (this.storageOk
-        ? 'Your layouts are saved in this browser. Private windows, other computers, and clearing cookies and site data won\'t have them. <button type="button" class="linkish" data-a="export">Export a backup</button> anytime.'
-        : 'This browser isn\'t letting the table save layouts right now, often because of a privacy setting. You can still arrange the table, and Export will keep a copy.') + '</div></div>';
+      } else h += btn('save', author ? 'Save current layout as shared…' : 'Save current layout as…');
+      if (own) h += btn('update', 'Update "' + own.name + '" with the current view');
+      if (act && edited) h += btn('undo', 'Undo changes to "' + act.name + '"');
+      if (own && mode !== 'rename') h += btn('rename', 'Rename "' + own.name + '"…') + btn('delete', (confirmDelete ? 'Click again to delete "' : 'Delete "') + own.name + '"');
+      h += '<hr>' + btn('export', author ? 'Export shared layouts' : 'Export layouts', this.exportList().length ? '' : ' disabled') +
+        btn('import', author ? 'Import into shared layouts…' : 'Import layouts…') + '<input type="file" accept=".json,application/json" hidden>';
+      if (!author) {
+        h += '<div class="tp-lnote">' + (this.storageOk
+          ? 'Your layouts are saved in this browser. Private windows, other computers, and clearing cookies and site data won\'t have them. <button type="button" class="linkish" data-a="export">Export a backup</button> anytime.'
+          : 'This browser isn\'t letting the table save layouts right now, often because of a privacy setting. You can still arrange the table, and Export will keep a copy.') + '</div>';
+      }
+      h += '</div>';
       this.openPop(anchor, h, pop => {
         const input = pop.querySelector('.tp-lname input');
         if (input) {
@@ -2067,17 +2212,19 @@
           const b = e.target.closest('button[data-a]');
           if (!b || b.disabled) return;
           const a = b.dataset.a;
-          // The data may have refreshed while the menu was open, which reloads the saved list.
-          const L = this.presets.list, act = this.activePreset();
+          // The data may have refreshed while the menu was open, which reloads the saved lists.
+          const L = author ? this.sharedList() : this.presets.list, act = this.activePreset(), kind = this.presets.kind;
+          const own = act && (author ? kind === 'shared' : kind === 'mine') ? act : null;
+          const store = () => { if (author) this.saveConfig(); else this.savePresets(); };
           if (a === 'save' || a === 'rename') return this.openPresets(anchor, a);
           if (a === 'delete' && !confirmDelete) return this.openPresets(anchor, null, true);
           if (a === 'import') return pop.querySelector('input[type="file"]').click();
           this.closePop();
           if (a === 'pub') return this.resetLocal();
-          if (a === 'apply') return this.applyPreset(b.dataset.name);
+          if (a === 'apply') return this.applyPreset(b.dataset.name, b.dataset.kind);
           if (a === 'save-ok') {
             const name = input.value.trim().slice(0, 60);
-            if (name && this.presets.list.some(x => x.name === name) && this.confirmReplace !== name) {
+            if (name && L.some(x => x.name === name) && this.confirmReplace !== name) {
               this.confirmReplace = name;
               this.openPresets(anchor, 'save');
               const box = this.pop.querySelector('.tp-lname input');
@@ -2090,19 +2237,24 @@
           }
           if (a === 'rename-ok') {
             const name = input.value.trim().slice(0, 60);
-            if (!name || !act) return;
-            if (L.some(x => x !== act && x.name === name)) return this.flash('There is already a layout named "' + name + '". Pick another name.');
-            act.name = name;
+            if (!name || !own) return;
+            if (L.some(x => x !== own && x.name === name)) return this.flash('There is already a layout named "' + name + '". Pick another name.');
+            own.name = name;
             this.presets.active = name;
-            this.savePresets();
+            store();
             return this.refresh();
           }
-          if (a === 'update') { act.layout = JSON.parse(JSON.stringify(this.local || {})); act.params = this.captureParams(); act.savedAt = new Date().toISOString(); this.savePresets(); this.refresh(); return this.flashOk('Updated "' + act.name + '"'); }
-          if (a === 'undo') return this.applyPreset(act.name);
-          if (a === 'delete') {
-            this.presets.list = L.filter(x => x !== act);
+          if (a === 'update' && own) {
+            Object.assign(own, this.snapshotEntry(own.name));
+            store();
+            this.refresh();
+            return this.flashOk('Updated "' + own.name + '"');
+          }
+          if (a === 'undo' && act) return this.applyPreset(act.name, kind);
+          if (a === 'delete' && own) {
+            if (author) this.cfg.sharedLayouts = L.filter(x => x !== own); else this.presets.list = L.filter(x => x !== own);
             this.presets.active = null;
-            this.savePresets();
+            store();
             return this.refresh();
           }
           if (a === 'export') return this.exportPresets();
@@ -2163,7 +2315,8 @@
           !c.isNum && gl < 0 && gk.length < MAX_LEVELS ? ['group', gk.length ? 'Add subtotal level ' + (gk.length + 1) : 'Subtotal by this column'] : null,
           gl >= 0 ? ['ungroup', gk.length > 1 ? 'Remove subtotal level ' + (gl + 1) : 'Remove subtotals'] : null,
           gl >= 0 ? ['collapse-all', 'Collapse all'] : null,
-          gl >= 0 ? ['expand-all', 'Expand all'] : null, '-',
+          gl >= 0 ? ['expand-all', 'Expand all'] : null,
+          gl >= 0 && this.authoring ? ['collapse-default', ((this.cfg.layout.collapseLevels || []).includes(c.key) ? '✓ ' : '') + 'Viewers start with this level collapsed'] : null, '-',
           ['rename', 'Rename…'], (this.authoring ? lay.labels && lay.labels[c.key] : this.local && this.local.labels && this.local.labels[c.key]) ? ['unrename', 'Reset name'] : null);
         // Shares only make sense for columns that add up, so ratio columns don't offer it.
         // Viewers can hide formatting they find distracting; it's saved with their layout.
@@ -2373,14 +2526,17 @@
         case 'expand-all': {
           const level = (this.groupCols || []).findIndex(g => g.key === c.key);
           if (level < 0) return;
-          for (let l = 0; l <= level; l++) {
-            for (const g of this.groupsAtLevel(l)) {
-              if (a === 'collapse-all' && l === level) this.collapsed.add(g.key); else this.collapsed.delete(g.key);
-            }
-          }
+          this.setLevelCollapsed(level, a === 'collapse-all');
           this.computeView();
           this.renderBody(true);
           return;
+        }
+        // Authors choose, on purpose, which levels viewers start with collapsed.
+        case 'collapse-default': {
+          const levels = this.cfg.layout.collapseLevels || [];
+          const on = levels.includes(c.key);
+          if (on) this.collapse.levels.delete(c.key); else this.collapse.levels.add(c.key);
+          return this.updateLayout({ collapseLevels: on ? levels.filter(k => k !== c.key) : levels.concat(c.key) });
         }
         case 'unrename': {
           const labels = Object.assign({}, this.authoring ? lay.labels : (this.local && this.local.labels) || {});
@@ -2555,7 +2711,7 @@
         rows = [];
         const walk = (list, hiddenAbove) => {
           for (const g of list) {
-            const collapsed = this.collapsed.has(g.key);
+            const collapsed = this.isCollapsed(g);
             rows.push({ type: 'group', label: g.label + ' subtotal', totals: Object.assign({ __label: g.colKey }, g.totals), collapsed, level: g.level, hidden: hiddenAbove });
             // Without subtotal rows in the file, there is no group outline to open, so nothing is hidden by it.
             const hid = sub && (hiddenAbove || collapsed);
@@ -2618,6 +2774,20 @@
         this.flash('Download failed: ' + ((e && e.message) || e));
       }
     }
+  }
+
+  // Saved collapsed groups: levels (subtotal columns) collapsed, plus groups opened or closed by hand.
+  function cleanCollapse(o) {
+    if (!o || typeof o !== 'object' || Array.isArray(o)) return null;
+    const strs = v => Array.isArray(v) ? v.filter(x => typeof x === 'string').slice(0, 5000) : [];
+    return { levels: strs(o.levels), open: strs(o.open), closed: strs(o.closed) };
+  }
+
+  function cleanEntry(x) {
+    const out = { name: String(x.name).trim().slice(0, 60), layout: cleanLayout(x.layout), params: cleanParams(x.params), savedAt: typeof x.savedAt === 'string' ? x.savedAt : new Date().toISOString() };
+    const c = cleanCollapse(x.collapse);
+    if (c) out.collapse = c;
+    return out;
   }
 
   // Saved parameter values: plain strings, numbers and true/false only.
