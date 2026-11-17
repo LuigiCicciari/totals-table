@@ -2,6 +2,11 @@
 
 All notable changes to Totals Table. Versions follow [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH, where a patch fixes bugs, a minor version adds features without breaking anything, and a major version changes something existing (read its notes before updating). The version in use shows when hovering the info icon in the table's toolbar.
 
+## 1.6.3 (2026-11-17)
+
+**Changed**
+- CSV downloads keep numbers at full value instead of rounding them to the decimals the table shows. A CSV is for pivots and further math, and rounded values made recalculated ratios drift from the dashboard (for example a cost per order rebuilt from an order count of 2.9 instead of 2.933). The CSV and Excel downloads now hold the same values; Excel still shows them formatted. Values are trimmed to 15 significant digits so floating-point noise like 0.30000000000000004 comes out as 0.3.
+
 ## 1.6.2 (2026-11-17)
 
 **Fixed**

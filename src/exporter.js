@@ -6,7 +6,6 @@
 
   const MAX_CELL = 32767;
   const BAD_XML = /[\x00-\x08\x0B\x0C\x0E-\x1F￾￿]/g;
-  const SCALE_DEC = { '': 0, K: 3, M: 6, B: 9 };
 
   function pad(n) { return (n < 10 ? '0' : '') + n; }
 
@@ -21,17 +20,13 @@
     return t.length > MAX_CELL ? t.slice(0, MAX_CELL) : t;
   }
 
-  // Raw number rounded to what the table displays, so CSV values match the screen without symbols.
-  function roundAsShown(v, spec) {
-    if (!spec) return Number(v.toPrecision(12));
-    const dec = spec.dec + (spec.pct ? 2 : 0) + SCALE_DEC[spec.scale || ''];
-    return Number(v.toFixed(Math.min(dec, 15)));
-  }
+  // Full value for pivots and further math, trimmed to 15 significant digits to drop floating-point noise.
+  function fullValue(v) { return Number(v.toPrecision(15)); }
 
   // snap.value(col, rowIndex) -> { kind: 'num'|'date'|'text'|'null', v, time }
   function csvCell(cell, col) {
     switch (cell.kind) {
-      case 'num': return String(roundAsShown(cell.v, col.spec));
+      case 'num': return String(fullValue(cell.v));
       case 'date': return isoFromMs(cell.v, cell.time);
       case 'text': return noFormula(cleanText(cell.v));
       case 'link': return noFormula(cleanText(cell.csv != null ? cell.csv : cell.v));
@@ -222,5 +217,5 @@
     return (name || 'export').slice(0, 150) + '.' + ext;
   }
 
-  return { buildCsv, buildXlsx, buildFileName, roundAsShown, sheetName, isoFromMs };
+  return { buildCsv, buildXlsx, buildFileName, sheetName, isoFromMs };
 });
