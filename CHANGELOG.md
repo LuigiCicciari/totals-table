@@ -2,6 +2,17 @@
 
 All notable changes to Totals Table. Versions follow [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH, where a patch fixes bugs, a minor version adds features without breaking anything, and a major version changes something existing (read its notes before updating). The version in use shows when hovering the info icon in the table's toolbar.
 
+## 1.6.0 (2026-11-17)
+
+**Added**
+- Double-click the right edge of a column header to fit the column to its contents (header, totals, subtotals and the rows shown, up to 600px wide).
+- Search highlights the matching text in each cell, and the row count says how many rows match.
+- % of group: a column that sums can get a companion "% of group" column from its menu while the table has subtotals. Each row shows its share of the group it sits in, and each subtotal row shows its share of the level above. Without subtotals it shows the share of the total, and its tooltip says so.
+- Weighted averages, opt-in: with "Let viewers total a column as a weighted average" turned on in Format → Display, anyone who can change the layout can pick "Total as weighted average…" in a number column's menu and choose the weight column, for example Discount weighted by Sales. Totals and subtotals use Σ(value × weight) ÷ Σ(weight), the column menu and tooltip say which weight is used, and the choice is saved with that person's layout. Rows missing either value are left out, and weights that add up to zero or less leave the total blank. "Use the normal total" goes back.
+
+**Fixed**
+- The column resize grip is easier to grab: all of it is now inside the header, and the menu arrow no longer sits under it.
+
 ## 1.5.0 (2026-11-16)
 
 **Added**

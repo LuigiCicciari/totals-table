@@ -25,6 +25,7 @@
     $('showSearch').checked = cfg.showSearch;
     $('showTooltips').checked = cfg.showTooltips;
     $('allowViewerLayout').checked = cfg.allowViewerLayout;
+    $('viewerWeights').checked = !!cfg.viewerWeights;
     $('totalsShow').checked = cfg.totals.show;
     $('totalsLocation').value = cfg.totals.location;
     // "Freeze up to here" can freeze more columns than the list offers; add that choice so Save keeps it.
@@ -51,6 +52,7 @@
     cfg.showSearch = $('showSearch').checked;
     cfg.showTooltips = $('showTooltips').checked;
     cfg.allowViewerLayout = $('allowViewerLayout').checked;
+    cfg.viewerWeights = $('viewerWeights').checked;
     cfg.totals = { show: $('totalsShow').checked, location: $('totalsLocation').value };
     const fz = $('freeze').value;
     cfg.layout.freeze = fz === 'auto' ? 'auto' : Number(fz);

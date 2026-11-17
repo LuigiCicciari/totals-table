@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <title>Format Table</title>
-  <link rel="stylesheet" href="css/format.css?v=202611161559">
+  <link rel="stylesheet" href="css/format.css?v=202611171200">
 </head>
 <body>
   <header>
@@ -33,6 +33,7 @@
       <fieldset>
         <legend>Totals</legend>
         <label class="check"><input type="checkbox" id="totalsShow"> Show a totals row</label>
+        <label class="check"><input type="checkbox" id="viewerWeights"> Let viewers total a column as a weighted average (they pick the weight column in the column menu)</label>
         <label class="field">Position <select id="totalsLocation"><option value="top">Top</option><option value="bottom">Bottom</option></select></label>
       </fieldset>
       <fieldset>
@@ -167,9 +168,9 @@
 
   <script src="lib/tableau.extensions.1.latest.min.js"></script>
   <script>if (/[?&]mock\b/.test(location.search) && /^(localhost|127\.0\.0\.1)$/.test(location.hostname)) document.write('<script src="test/mock-viz.js"><\/script>');</script>
-  <script src="src/rules.js?v=202611161559"></script>
-  <script src="src/exporter.js?v=202611161559"></script>
-  <script src="src/table.js?v=202611161559"></script>
-  <script src="src/format.js?v=202611161559"></script>
+  <script src="src/rules.js?v=202611171200"></script>
+  <script src="src/exporter.js?v=202611171200"></script>
+  <script src="src/table.js?v=202611171200"></script>
+  <script src="src/format.js?v=202611171200"></script>
 </body>
 </html>

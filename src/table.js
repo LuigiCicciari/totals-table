@@ -10,8 +10,8 @@
   const MAX_LEVELS = 3;
   const NUL = '\u0000null';
   // Semantic version (MAJOR.MINOR.PATCH); see CHANGELOG.md. The ?v= tags in the HTML are only for browser caches.
-  const VERSION = '1.5.0';
-  const calcKey = d => d.kind === 'rank' ? '__rank:' + (d.dir || 'desc') + ':' + d.src : d.kind === 'run' ? '__run:' + d.src : '__' + d.kind + ':' + d.src + '|' + d.other;
+  const VERSION = '1.6.0';
+  const calcKey = d => d.kind === 'rank' ? '__rank:' + (d.dir || 'desc') + ':' + d.src : d.kind === 'run' || d.kind === 'pgrp' ? '__' + d.kind + ':' + d.src : '__' + d.kind + ':' + d.src + '|' + d.other;
 
   function defaults() {
     return {
@@ -21,6 +21,8 @@
       showSearch: false,
       showTooltips: true,
       allowViewerLayout: true,
+      // Lets anyone who can change the layout total a number column as an average weighted by another column.
+      viewerWeights: false,
       nullText: { string: 'Null', number: 'Null', date: 'Null' },
       totals: { show: true, location: 'top' },
       autoHideNone: true,
@@ -41,7 +43,7 @@
       hideWhen: {},
       // Whole-table look. The defaults are the original design, so nothing changes until an author sets something.
       style: { size: 'normal', density: 'normal', text: '#1f2328', headBg: '#f6f8fa', headText: '#1f2328', headBold: true, headWrap: false, lines: 'both', banding: true, totBg: '#fbfbfc', totBold: true, subBg: '#f3f5f8', subBold: true, neg: '', accent: '#1f6feb' },
-      layout: { order: [], hidden: [], widths: {}, labels: {}, freeze: 'auto', sort: null, groupBy: null, pct: [], calc: [], cfOff: [], hideGroups: false, topN: null, collapseLevels: [] }
+      layout: { order: [], hidden: [], widths: {}, labels: {}, freeze: 'auto', sort: null, groupBy: null, pct: [], calc: [], cfOff: [], hideGroups: false, topN: null, weights: {}, collapseLevels: [] }
     };
   }
 
@@ -399,6 +401,14 @@
 
     colDef(key) { return this.store.columns.find(c => c.key === key); }
 
+    // The weight column chosen for a number column's total, when the author allows weighted averages.
+    weightFor(c) {
+      if (!this.cfg.viewerWeights || c.virtual) return null;
+      const k = this.layout.weights && this.layout.weights[c.key];
+      const w = k && k !== c.key && this.colDef(k);
+      return w && w.isNum && !w.virtual ? k : null;
+    }
+
     // Sorts are a list of { key, dir }, first one wins; older layouts stored a single object.
     sortList() { const s = this.layout.sort; return !s ? [] : Array.isArray(s) ? s : s.key ? [s] : []; }
 
@@ -429,10 +439,10 @@
       for (const d of defs) {
         if (st.columns.some(c => c.key === d.key)) continue;
         const src = this.colDef(d.src);
-        const spec = d.kind === 'pct' ? { cur: '', pct: true, dec: 2, group: false, scale: '', neg: 'minus' }
+        const spec = d.kind === 'pct' || d.kind === 'pgrp' ? { cur: '', pct: true, dec: 2, group: false, scale: '', neg: 'minus' }
           : d.kind === 'pdiff' ? { cur: '', pct: true, dec: 1, group: false, scale: '', neg: 'minus' }
           : d.kind === 'rank' ? { cur: '', pct: false, dec: 0, group: true, scale: '', neg: 'minus' } : src.spec;
-        const excelFmt = d.kind === 'pct' ? '0.00%;-0.00%' : d.kind === 'pdiff' ? '0.0%;-0.0%' : d.kind === 'rank' ? '#,##0' : src.excelFmt;
+        const excelFmt = d.kind === 'pct' || d.kind === 'pgrp' ? '0.00%;-0.00%' : d.kind === 'pdiff' ? '0.0%;-0.0%' : d.kind === 'rank' ? '#,##0' : src.excelFmt;
         const col = { key: d.key, name: '', virtual: true, vkind: d.kind, srcKey: d.src, otherKey: d.other, dir: d.dir, isNum: true, dataType: 'float', spec, excelFmt, ownSpec: spec, ownExcel: excelFmt };
         st.columns.push(col);
         col.name = this.labelFor(col);
@@ -443,8 +453,11 @@
 
     // Shares are of the filtered total, so they always add up to 100% of what is on screen. Ranks cover the
     // filtered rows. Running totals are filled later, once the final row order is known.
-    fillVirtual(idx) {
+    fillVirtual(idx, cols) {
       const st = this.store;
+      // % of group divides by the subtotal of the innermost group a row sits in (the whole table when there are none).
+      const gks = this.groupKeys().filter(k => (cols || []).some(c => c.key === k));
+      const rowGroup = i => gks.map(k => { const f = st.fmt[k][i]; return f == null ? NUL : f; }).join('\u0001');
       for (const c of st.columns) {
         if (!c.virtual || c.vkind === 'run') continue;
         const src = st.raw[c.srcKey], raw = st.raw[c.key], fmt = st.fmt[c.key];
@@ -466,6 +479,10 @@
             if (a !== a || b !== b) continue;
             raw[i] = c.vkind === 'diff' ? a - b : b ? (a - b) / b : NaN;
           }
+        } else if (c.vkind === 'pgrp') {
+          const sums = new Map();
+          for (const i of idx) { const v = src[i]; if (v !== v) continue; const g = rowGroup(i); sums.set(g, (sums.get(g) || 0) + v); }
+          for (const i of idx) { const v = src[i], t = sums.get(rowGroup(i)); raw[i] = v === v && t ? v / t : NaN; }
         } else {
           let total = 0;
           for (const i of idx) { const v = src[i]; if (v === v) total += v; }
@@ -520,7 +537,7 @@
       if (col.virtual) {
         const src = this.colDef(col.srcKey), oth = col.otherKey && this.colDef(col.otherKey);
         const s = src ? this.labelFor(src) : col.srcKey, o = oth ? this.labelFor(oth) : '';
-        return { pct: s + ' % of total', rank: s + ' rank', run: s + ' running total', diff: s + ' − ' + o, pdiff: s + ' vs ' + o + ' %' }[col.vkind || 'pct'];
+        return { pct: s + ' % of total', pgrp: s + ' % of group', rank: s + ' rank', run: s + ' running total', diff: s + ' − ' + o, pdiff: s + ' vs ' + o + ' %' }[col.vkind || 'pct'];
       }
       const p = this.paramFor(col);
       return p ? p.value : col.name;
@@ -586,11 +603,11 @@
       this.frozenWidth = left;
 
       const idx = this.filterRows(cols);
-      this.fillVirtual(idx);
+      this.fillVirtual(idx, cols);
       this.sortRows(idx, this.sortList(), cols);
+      this.viewCols = cols;
       const totals = this.computeTotals(cols, idx);
       this.computeCfStats(cols, idx);
-      this.viewCols = cols;
       const disp = this.groupRows(cols, idx, this.groupKeys());
       this.fillRunning(cols, idx);
       this.view = { cols, idx, disp, totals, nFrozen, spans: this.groupSpans(cols) };
@@ -788,8 +805,11 @@
           a.total = this.totalSpec(a); b.total = this.totalSpec(b);
           return { type: 'diff', mode: c.vkind, a, b, source: 'calc', text: c.vkind === 'diff' ? 'Total of ' + this.labelFor(a) + ' − total of ' + this.labelFor(b) : '(Total of ' + this.labelFor(a) + ' − total of ' + this.labelFor(b) + ') ÷ total of ' + this.labelFor(b) };
         }
+        if (c.vkind === 'pgrp') return { type: 'pgrp', source: 'calc', text: this.groupKeys().some(k => (this.viewCols || []).some(x => x.key === k)) ? 'Share of its group' : 'Share of total (no groups)' };
         return { type: 'sum', source: 'pct', text: 'Share of the filtered total' };
       }
+      const wk = this.weightFor(c);
+      if (wk) return { type: 'wavg', weightKey: wk, source: 'weight', text: 'Average weighted by ' + this.labelFor(this.colDef(wk)) };
       const t = R.resolveTotal(c, this.store.columns, this.cfg.rules && this.cfg.rules.doc, this.cfg.totalOverrides[c.key]);
       t.text = R.describeTotal(t, this.store.columns.map(x => ({ key: x.key, name: this.labelFor(x) })));
       return t;
@@ -807,8 +827,14 @@
     }
 
     // Difference columns total from their two columns' own totals, so ratio columns compare correctly.
-    totalOf(c, rows) {
+    totalOf(c, rows, parentRows) {
       const t = c.total;
+      if (t && t.type === 'pgrp') {
+        const src = this.store.raw[c.srcKey];
+        const sum = list => { let s = 0; for (const i of list) { const v = src[i]; if (v === v) s += v; } return s; };
+        const a = sum(rows), b = parentRows ? sum(parentRows) : a;
+        return b ? a / b : null;
+      }
       if (t && t.type === 'diff') {
         const A = this.totalOf(t.a, rows), B = this.totalOf(t.b, rows);
         if (A == null || B == null) return null;
@@ -850,7 +876,7 @@
         const list = Array.from(map.values());
         for (const g of list) {
           g.totals = {};
-          for (const c of cols) if (c.isNum) g.totals[c.key] = this.totalOf(c, g.rows);
+          for (const c of cols) if (c.isNum) g.totals[c.key] = this.totalOf(c, g.rows, rows);
           if (level + 1 < gcs.length) g.children = build(g.rows, level + 1, g.key + '\u0001');
           else g.top = this.topFor(g.rows, g.key, level + 1, cols);
         }
@@ -919,7 +945,7 @@
       const { shown, other } = this.topSplit(rows, t);
       if (!other.length) return { shown, node: null };
       const node = { type: 'group', isOther: true, key: '\u0002other\u0001' + key, label: 'Other', rows: other, level, colKey: this.otherLabelKey(cols), totals: {} };
-      for (const c of cols) if (c.isNum) node.totals[c.key] = this.totalOf(c, other);
+      for (const c of cols) if (c.isNum) node.totals[c.key] = this.totalOf(c, other, rows);
       return { shown, node };
     }
 
@@ -1047,6 +1073,7 @@
         const shown = this.view.idx.length;
         const rows = n => n.toLocaleString() + (n === 1 ? ' row' : ' rows');
         text = shown === st.n ? rows(st.n) : shown.toLocaleString() + ' of ' + rows(st.n);
+        if (this.search) text = (shown ? shown.toLocaleString() + (shown === 1 ? ' row matches' : ' rows match') : 'No rows match') + ' "' + this.search + '"' + (shown ? ' (of ' + st.n.toLocaleString() + ')' : '');
         if (!st.complete) text = 'Loading ' + st.n.toLocaleString() + ' of ' + (st.total || 0).toLocaleString() + '…';
       }
       this.statusEl.textContent = text || '';
@@ -1219,6 +1246,7 @@
       const t = c.isNum && c.total;
       if (!t) return '';
       if (c.vkind === 'pct') return 'Share of the filtered total';
+      if (c.vkind === 'pgrp' || t.type === 'wavg') return t.text;
       if (c.vkind === 'rank' || c.vkind === 'run') return '';
       if (t.problem && !this.authoring) return '';
       const problem = t.problem ? ' (total blank: ' + t.problem + ')' : '';
@@ -1333,6 +1361,14 @@
       const cfCols = cols.map(c => !!(c.isNum && this.cfg.cf[c.key] && this.cfg.cf[c.key].type));
       const reds = cols.map(c => !!(c.isNum && c.spec && c.spec.red));
       const rg = this.normRange();
+      const q = this.search ? this.search.toLowerCase() : '';
+      const mark = (j, v) => {
+        if (!q || cols[j].virtual) return esc(v);
+        const lo = v.toLowerCase();
+        let out = '', at = 0, k;
+        while ((k = lo.indexOf(q, at)) >= 0) { out += esc(v.slice(at, k)) + '<mark>' + esc(v.slice(k, k + q.length)) + '</mark>'; at = k + q.length; }
+        return out + esc(v.slice(at));
+      };
       let h = '';
       for (let r = start; r < end; r++) {
         const d = disp[r];
@@ -1357,7 +1393,7 @@
           const v = fmts[j][d];
           const inRange = rg && r >= rg.r0 && r <= rg.r1 && j >= rg.c0 && j <= rg.c1;
           const f = cfCols[j] ? this.cellFormat(cols[j], st.raw[cols[j].key][d], false) : null;
-          let inner = v == null ? nulls[j] : this.cfInner(f, esc(v));
+          let inner = v == null ? nulls[j] : this.cfInner(f, mark(j, v));
           const lk = links[j];
           const url = lk && this.safeUrl(lk.urls[d]);
           if (url && (v != null || lk.label)) inner = `<a class="tp-link" href="${esc(url)}" target="_blank" rel="noopener noreferrer" title="${esc(url)}">${esc(lk.label || v)}</a>`;
@@ -1415,6 +1451,10 @@
           const again = this.head.querySelector(`input[data-i="${focusKey.split(':')[0]}"][data-k="${focusKey.split(':')[1]}"]`);
           if (again && document.activeElement !== again) again.focus();
         }, 200);
+      });
+      this.head.addEventListener('dblclick', e => {
+        const rz = e.target.closest('.tp-rz');
+        if (rz) this.autoFit(+rz.dataset.i);
       });
       this.head.addEventListener('mousedown', e => {
         if (e.button !== 0) return;
@@ -1568,6 +1608,32 @@
       };
       window.addEventListener('mousemove', move);
       window.addEventListener('mouseup', up);
+    }
+
+    // Fits a column to its header, totals and the widest of the shown rows (up to 5,000 measured, capped at 600px).
+    autoFit(i) {
+      const c = this.view.cols[i];
+      if (!c || !this.canEditLayout()) return;
+      const ctx = (this.measureCtx = this.measureCtx || document.createElement('canvas').getContext('2d'));
+      const font = getComputedStyle(this.el).font || '12px sans-serif';
+      ctx.font = font;
+      const width = t => t ? ctx.measureText(String(t)).width : 0;
+      const fmt = this.store.fmt[c.key];
+      let w = 0;
+      const rows = this.view.idx;
+      for (let k = 0; k < rows.length && k < 5000; k++) { const v = fmt[rows[k]]; w = Math.max(w, width(v == null ? this.nullFor(c) : v)); }
+      ctx.font = 'bold ' + font;
+      const tot = this.view.totals && this.view.totals[c.key];
+      if (tot != null) w = Math.max(w, width(R.formatNumber(tot, c.spec)));
+      for (const d of this.view.disp) {
+        if (typeof d !== 'object') continue;
+        if (d.colKey === c.key) w = Math.max(w, 14 + width(d.label + ' (' + d.rows.length.toLocaleString() + ')'));
+        else if (c.isNum && d.totals[c.key] != null) w = Math.max(w, width(R.formatNumber(d.totals[c.key], c.spec)));
+      }
+      const hc = this.head.querySelector(`.tp-h[data-i="${i}"]`), hl = hc && hc.querySelector('.tp-hl');
+      const head = hl ? hl.scrollWidth + (hc.offsetWidth - hl.clientWidth) + 2 : width(c.label) + 40;
+      const nw = Math.round(Math.max(MIN_W, Math.min(600, Math.max(w + 18, head))));
+      if (nw !== c.w) this.updateLayout({ widths: Object.assign({}, this.layout.widths, { [c.key]: nw }) });
     }
 
     startFreezeDrag(e) {
@@ -2338,10 +2404,14 @@
           const sums = c.total && c.total.type === 'sum';
           items.push('-',
             hasPct || sums ? [hasPct ? 'pct-remove' : 'pct-add', hasPct ? 'Remove % of total column' : 'Add % of total column'] : null,
+            sums && gk.length && !has({ kind: 'pgrp', src: c.key }) ? ['pgrp', 'Add % of group column'] : null,
             !has({ kind: 'rank', src: c.key, dir: 'desc' }) ? ['rank-desc', 'Add rank (largest = 1)'] : null,
             !has({ kind: 'rank', src: c.key, dir: 'asc' }) ? ['rank-asc', 'Add rank (smallest = 1)'] : null,
             sums && !has({ kind: 'run', src: c.key }) ? ['run', 'Add running total'] : null,
             ['compare', 'Compare with another column…'],
+            this.cfg.viewerWeights ? '-' : null,
+            this.cfg.viewerWeights ? ['weight', 'Total as weighted average…'] : null,
+            this.weightFor(c) ? ['weight-off', 'Use the normal total'] : null,
             '-', ['topn', 'Show top or bottom…'],
             lay.topN && lay.topN.key === c.key ? ['topn-off', 'Show all rows'] : null);
         }
@@ -2368,6 +2438,7 @@
         if (b.dataset.a === 'g-new') return this.askName(anchor, 'Group name (shown above this column)', '', name => this.setGroups(g => { g[c.key] = name; }));
         if (b.dataset.a === 'compare') return this.openCompare(i, anchor);
         if (b.dataset.a === 'topn') return this.openTopN(i, anchor);
+        if (b.dataset.a === 'weight') return this.openWeight(i, anchor);
         this.menuAction(b.dataset.a, i, c);
       }));
     }
@@ -2458,6 +2529,23 @@
         // Turning it on also sorts by the same column, largest (or smallest) first, so the rows read as a ranking.
         // Any other sort can be chosen afterwards.
         this.updateLayout({ topN: { key: c.key, n: Math.min(n, 100000), dir }, sort: [{ key: c.key, dir: dir === 'bottom' ? 'asc' : 'desc' }] });
+      }));
+    }
+
+    openWeight(i, anchor) {
+      const c = this.view.cols[i];
+      const others = this.store.columns.filter(x => x.isNum && !x.virtual && x.key !== c.key && !this.autoHidden(x));
+      if (!others.length) return this.flash('There is no other number column to weight by.');
+      const cur = this.weightFor(c);
+      const html = `<div class="tp-menu tp-picker tp-compare"><div class="tp-ph">Total ${esc(c.label)} as an average weighted by</div>` +
+        `<select aria-label="Weight column">${others.map(x => `<option value="${esc(x.key)}"${x.key === cur ? ' selected' : ''}>${esc(this.labelFor(x))}</option>`).join('')}</select>` +
+        '<p class="tp-wnote">Pick what the number is "per": a discount per dollar of sales is weighted by sales.</p>' +
+        '<hr><button type="button" data-a="ok">Use this weight</button></div>';
+      this.openPop(anchor, html, pop => pop.addEventListener('click', e => {
+        if (!e.target.closest('button[data-a="ok"]')) return;
+        const k = pop.querySelector('select').value;
+        this.closePop();
+        this.updateLayout({ weights: Object.assign({}, this.layout.weights, { [c.key]: k }) });
       }));
     }
 
@@ -2557,6 +2645,8 @@
           if (c.vkind === 'pct') return this.updateLayout({ pct: (lay.pct || []).filter(k => k !== c.srcKey) });
           return this.updateLayout({ calc: (lay.calc || []).filter(d => calcKey(d) !== c.key) });
         case 'topn-off': return this.updateLayout({ topN: null });
+        case 'pgrp': return this.updateLayout({ calc: (lay.calc || []).concat({ kind: 'pgrp', src: c.key }) });
+        case 'weight-off': { const w = Object.assign({}, lay.weights); delete w[c.key]; return this.updateLayout({ weights: w }); }
         case 'pct-add': return this.updateLayout({ pct: (lay.pct || []).concat(c.key) });
         case 'pct-remove': {
           const src = c.virtual ? c.srcKey : c.key;
@@ -2829,6 +2919,7 @@
     for (const k of ['order', 'hidden', 'pct', 'cfOff']) if (k in l) { const v = strs(l[k]); if (v) out[k] = v; }
     if ('widths' in l) { const v = map(l.widths, x => typeof x === 'number' && isFinite(x) && x > 0 && x < 5000); if (v) out.widths = v; }
     if ('labels' in l) { const v = map(l.labels, x => typeof x === 'string'); if (v) out.labels = v; }
+    if ('weights' in l) { const v = map(l.weights, x => typeof x === 'string'); if (v) out.weights = v; }
     if (l.freeze === 'auto') out.freeze = 'auto';
     else if (typeof l.freeze === 'number' && isFinite(l.freeze) && l.freeze >= 0) out.freeze = Math.floor(l.freeze);
     const okSort = x => x && typeof x.key === 'string' && (x.dir === 'asc' || x.dir === 'desc');
@@ -2844,7 +2935,7 @@
     }
     if (Array.isArray(l.calc)) {
       out.calc = l.calc.filter(d => d && typeof d.src === 'string' && (
-        (d.kind === 'rank' && (d.dir === undefined || d.dir === 'asc' || d.dir === 'desc')) || d.kind === 'run' ||
+        (d.kind === 'rank' && (d.dir === undefined || d.dir === 'asc' || d.dir === 'desc')) || d.kind === 'run' || d.kind === 'pgrp' ||
         ((d.kind === 'diff' || d.kind === 'pdiff') && typeof d.other === 'string')
       )).map(d => { const o = { kind: d.kind, src: d.src }; if (d.dir) o.dir = d.dir; if (d.other) o.other = d.other; return o; });
     }

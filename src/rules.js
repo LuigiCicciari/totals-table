@@ -115,6 +115,7 @@
       case 'min': return 'Minimum';
       case 'max': return 'Maximum';
       case 'none': return 'No total';
+      case 'wavg': return 'Average weighted by ' + nameOf(t.weightKey);
       case 'ratio': {
         const base = (t.numKey ? nameOf(t.numKey) : t.numerator) + ' ÷ ' + (t.denKey ? nameOf(t.denKey) : t.denominator);
         return base + (t.multiplier && t.multiplier !== 1 ? ' × ' + t.multiplier : '');
@@ -138,6 +139,18 @@
       }
       if (!sb) return null;
       return (sa / sb) * (t.multiplier || 1);
+    }
+    // Weighted average: rows missing either value are left out; weights that add up to zero or less give no total.
+    if (t.type === 'wavg') {
+      const v = raw(colKey), w = raw(t.weightKey);
+      let sw = 0, swx = 0;
+      for (let k = 0; k < idx.length; k++) {
+        const i = idx[k];
+        const x = v[i], y = w[i];
+        if (x !== x || y !== y) continue;
+        sw += y; swx += x * y;
+      }
+      return sw > 0 ? swx / sw : null;
     }
     const v = raw(colKey);
     let s = 0, n = 0, mn = Infinity, mx = -Infinity;
