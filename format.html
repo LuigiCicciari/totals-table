@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <title>Format Table</title>
-  <link rel="stylesheet" href="css/format.css?v=202611172100">
+  <link rel="stylesheet" href="css/format.css?v=202611181600">
 </head>
 <body>
   <header>
@@ -59,7 +59,7 @@
     </section>
 
     <section id="tab-columns" role="tabpanel" hidden>
-      <p class="muted small">Header: leave blank to use the parameter value (when the field and a parameter share a name) or the field name. Total "Auto" follows the imported rules, then sums. Group: columns with the same group name get a shared header above them; leave blank for none.</p>
+      <p class="muted small">Header: leave blank to use the parameter value or the field name. Header from parameter "Auto" links a column to the parameter with the same name, or to one with a dotted prefix such as "east.Column 1". It can't see your calculations, so if a field uses a differently named parameter, choose it here. When several prefixed sets fit, pick one column's parameter and the other columns follow that prefix. Total "Auto" follows the imported rules, then sums. Group: columns with the same group name get a shared header above them; leave blank for none.</p>
       <datalist id="groupList"></datalist>
       <table class="cols">
         <thead><tr><th>Field</th><th>Header</th><th>Group</th><th>Header from parameter</th><th>Total</th><th>Link</th><th>Hide when</th><th>Hidden</th></tr></thead>
@@ -168,9 +168,9 @@
 
   <script src="lib/tableau.extensions.1.latest.min.js"></script>
   <script>if (/[?&]mock\b/.test(location.search) && /^(localhost|127\.0\.0\.1)$/.test(location.hostname)) document.write('<script src="test/mock-viz.js"><\/script>');</script>
-  <script src="src/rules.js?v=202611172100"></script>
-  <script src="src/exporter.js?v=202611172100"></script>
-  <script src="src/table.js?v=202611172100"></script>
-  <script src="src/format.js?v=202611172100"></script>
+  <script src="src/rules.js?v=202611181600"></script>
+  <script src="src/exporter.js?v=202611181600"></script>
+  <script src="src/table.js?v=202611181600"></script>
+  <script src="src/format.js?v=202611181600"></script>
 </body>
 </html>

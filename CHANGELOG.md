@@ -2,6 +2,12 @@
 
 All notable changes to Totals Table. Versions follow [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH, where a patch fixes bugs, a minor version adds features without breaking anything, and a major version changes something existing (read its notes before updating). The version in use shows when hovering the info icon in the table's toolbar.
 
+## 1.6.5 (2026-11-18)
+
+**Fixed**
+- Headers from parameters: Auto now also finds parameters with a dotted prefix, so a field "Column 1" follows a parameter "east.Column 1" when no parameter is named exactly "Column 1". This is common when a set of column parameters is copied for another dashboard. When several prefixed sets fit (east.Column 1 and west.Column 1), Auto follows the prefix chosen for any other column under Header from parameter, so picking one column's parameter sets the rest; with no such choice it links nothing rather than guess. This also brings back hiding a column when its parameter is set to "(none)" for these columns. Before, they showed "Auto (none found)" and didn't follow or hide.
+- Format's Columns & totals help explains that Auto matches by name and can't see calculation formulas.
+
 ## 1.6.4 (2026-11-17)
 
 **Fixed**

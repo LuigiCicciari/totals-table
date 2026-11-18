@@ -39,6 +39,22 @@
     return null;
   }
 
+  // The parameter a column's header follows: one with the same name first, otherwise one named like the column with
+  // a dotted prefix ("east.Column 1" for "Column 1"). When several prefixes fit, the prefix the author chose for
+  // another column wins (picked is a list of [column name, parameter name]); otherwise nothing is guessed.
+  function matchParam(name, params, picked) {
+    const lo = s => String(s).toLowerCase();
+    const n = lo(name);
+    const exact = params.find(p => lo(p) === n);
+    if (exact) return exact;
+    const prefixOf = (p, col) => { const a = lo(p), c = lo(col); return a.length > c.length + 1 && a.endsWith(c) && a[a.length - c.length - 1] === '.' ? a.slice(0, a.length - c.length) : null; };
+    const fits = params.filter(p => prefixOf(p, name) !== null);
+    if (fits.length < 2) return fits[0] || null;
+    const chosen = new Set((picked || []).map(([col, p]) => p && prefixOf(p, col)).filter(Boolean));
+    const hits = fits.filter(p => chosen.has(prefixOf(p, name)));
+    return hits.length === 1 ? hits[0] : null;
+  }
+
   function validateRules(obj) {
     if (!obj || typeof obj !== 'object' || !Array.isArray(obj.rules)) throw new Error('Rules file must be JSON with a "rules" list.');
     obj.rules.forEach((r, i) => {
@@ -286,6 +302,7 @@
     TOTAL_TYPES,
     normName,
     findColumn,
+    matchParam,
     validateRules,
     resolveTotal,
     describeTotal,

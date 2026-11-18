@@ -10,7 +10,7 @@
   const MAX_LEVELS = 3;
   const NUL = '\u0000null';
   // Semantic version (MAJOR.MINOR.PATCH); see CHANGELOG.md. The ?v= tags in the HTML are only for browser caches.
-  const VERSION = '1.6.4';
+  const VERSION = '1.6.5';
   const calcKey = d => d.kind === 'rank' ? '__rank:' + (d.dir || 'desc') + ':' + d.src : d.kind === 'run' || d.kind === 'pgrp' ? '__' + d.kind + ':' + d.src : '__' + d.kind + ':' + d.src + '|' + d.other;
 
   function defaults() {
@@ -540,8 +540,11 @@
     paramFor(col) {
       const link = this.cfg.headerLinks[col.key];
       if (link === '') return null;
-      const name = link || col.name;
-      return this.params.find(p => p.name.toLowerCase() === String(name).toLowerCase()) || null;
+      if (link) return this.params.find(p => p.name.toLowerCase() === String(link).toLowerCase()) || null;
+      const names = this.params.map(p => p.name);
+      const picked = Object.keys(this.cfg.headerLinks).map(k => { const d = this.store && this.colDef(k); return d ? [d.name, this.cfg.headerLinks[k]] : null; }).filter(Boolean);
+      const hit = R.matchParam(col.name, names, picked);
+      return hit ? this.params[names.indexOf(hit)] : null;
     }
 
     labelFor(col) {

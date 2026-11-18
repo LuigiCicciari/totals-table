@@ -119,7 +119,8 @@
     $('colRows').innerHTML = cols.map((c, i) => {
       const link = cfg.headerLinks[c.key];
       const linkSel = link === undefined ? '__auto__' : link === '' ? '__none__' : link;
-      const autoParam = params.find(p => p.toLowerCase() === c.name.toLowerCase());
+      const picked = Object.keys(cfg.headerLinks).map(k => { const d = cols.find(x => x.key === k); return d ? [d.name, cfg.headerLinks[k]] : null; }).filter(Boolean);
+      const autoParam = R.matchParam(c.name, params, picked);
       const o = cfg.totalOverrides[c.key] || { type: 'auto' };
       const totalCell = c.isNum
         ? `<select data-i="${i}" data-k="total">${R.TOTAL_TYPES.map(t => `<option value="${t}"${o.type === t ? ' selected' : ''}>${{ auto: 'Auto', sum: 'Sum', avg: 'Average', min: 'Minimum', max: 'Maximum', ratio: 'Ratio (A ÷ B)', none: 'None' }[t]}</option>`).join('')}</select>` +
@@ -184,6 +185,7 @@
     if (k === 'link') {
       if (el.value === '__auto__') delete cfg.headerLinks[c.key];
       else cfg.headerLinks[c.key] = el.value === '__none__' ? '' : el.value;
+      renderColumns();
       return;
     }
     if (k === 'urlMode' || k === 'urlLabel' || k === 'linkTo') {
