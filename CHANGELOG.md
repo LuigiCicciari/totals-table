@@ -2,6 +2,11 @@
 
 All notable changes to Totals Table. Versions follow [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH, where a patch fixes bugs, a minor version adds features without breaking anything, and a major version changes something existing (read its notes before updating). The version in use shows when hovering the info icon in the table's toolbar.
 
+## 1.6.4 (2026-11-17)
+
+**Fixed**
+- The freeze line looked doubled in the header and filter rows, because the grab handle drew its own line next to the column's edge line. The grab area is still 8px wide but is now invisible, so the freeze line is one line from top to bottom. Hovering the grab area turns the header's edge the accent color.
+
 ## 1.6.3 (2026-11-17)
 
 **Changed**
