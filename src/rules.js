@@ -48,10 +48,10 @@
     const exact = params.find(p => lo(p) === n);
     if (exact) return exact;
     const prefixOf = (p, col) => { const a = lo(p), c = lo(col); return a.length > c.length + 1 && a.endsWith(c) && a[a.length - c.length - 1] === '.' ? a.slice(0, a.length - c.length) : null; };
-    const fits = params.filter(p => prefixOf(p, name) !== null);
-    if (fits.length < 2) return fits[0] || null;
+    // A prefix only counts when it marks a set: at least two parameters share it, so "Target.Sales" alone isn't one.
+    const fits = params.filter(p => { const pre = prefixOf(p, name); return pre !== null && params.filter(q => lo(q).startsWith(pre)).length > 1; });
     const chosen = new Set((picked || []).map(([col, p]) => p && prefixOf(p, col)).filter(Boolean));
-    const hits = fits.filter(p => chosen.has(prefixOf(p, name)));
+    const hits = chosen.size ? fits.filter(p => chosen.has(prefixOf(p, name))) : fits;
     return hits.length === 1 ? hits[0] : null;
   }
 
@@ -96,22 +96,34 @@
     // Ratio parts named in a rule only match number columns. Columns picked in Format are used exactly as picked,
     // since two columns can share a name (SUM(Sales) and AVG(Sales) both show as Sales).
     const nums = columns.filter(c => c.isNum);
+    // When a rule's name fits several number columns, only the single SUM among them is used; otherwise nothing is guessed.
+    const byName = w => {
+      const exact = w && nums.find(x => eq(x.key, w));
+      if (exact) return { c: exact };
+      const c = findColumn(w, nums);
+      if (!c) return { c };
+      const same = nums.filter(x => eq(x.name, c.name));
+      if (same.length < 2) return { c };
+      const sums = same.filter(x => /^SUM\(/i.test(x.key));
+      return sums.length === 1 ? { c: sums[0], chose: c.name } : { c: null, unclear: c.name };
+    };
     const fromSpec = (t, source, label, picked) => {
       if (t.type !== 'ratio') return { type: t.type, source, label };
-      const num = picked ? picked.num : findColumn(t.numerator, nums);
-      const den = picked ? picked.den : findColumn(t.denominator, nums);
+      const n = picked ? { c: picked.num } : byName(t.numerator);
+      const d = picked ? { c: picked.den } : byName(t.denominator);
+      const num = n.c, den = d.c;
       const out = { type: 'ratio', source, label, numKey: num && num.key, denKey: den && den.key, multiplier: Number(t.multiplier) || 1, numerator: t.numerator, denominator: t.denominator };
-      if (!num || !den) out.problem = 'Needs ' + (!num ? '"' + t.numerator + '"' : '') + (!num && !den ? ' and ' : '') + (!den ? '"' + t.denominator + '"' : '') + ' on the Detail shelf';
-      if (!picked) {
-        const shared = [[num, t.numerator], [den, t.denominator]].filter(([c, w]) => c && !eq(c.key, w) && nums.filter(x => eq(x.name, c.name)).length > 1).map(([c]) => c.name);
-        if (shared.length) out.note = 'More than one number column is named "' + shared[0] + '", so the first is used. To choose, set this total in Format.';
-      }
+      const unclear = n.unclear || d.unclear;
+      if (unclear) out.problem = 'More than one number column is named "' + unclear + '". Choose this total\'s fields in Format';
+      else if (!num || !den) out.problem = 'Needs ' + (!num ? '"' + t.numerator + '"' : '') + (!num && !den ? ' and ' : '') + (!den ? '"' + t.denominator + '"' : '') + ' on the Detail shelf';
+      const chose = [n.chose && num, d.chose && den].filter(Boolean);
+      if (!unclear && chose.length) out.note = chose.map(c => 'More than one number column is named "' + c.name + '", so ' + c.key + ' is used.').join(' ') + ' To choose another, set this total in Format.';
       return out;
     };
     if (override && override.type && override.type !== 'auto') {
       if (override.type === 'ratio') {
-        const num = columns.find(c => c.key === override.numKey) || null;
-        const den = columns.find(c => c.key === override.denKey) || null;
+        const num = nums.find(c => c.key === override.numKey) || null;
+        const den = nums.find(c => c.key === override.denKey) || null;
         return fromSpec({ type: 'ratio', numerator: num ? num.name : override.numKey, denominator: den ? den.name : override.denKey, multiplier: override.multiplier }, 'override', undefined, { num, den });
       }
       return { type: override.type, source: 'override' };
@@ -282,10 +294,12 @@
   function parseIsoDate(s) {
     const m = typeof s === 'string' && s.match(ISO_RE);
     if (!m) return null;
-    const t = Date.UTC(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0));
-    if (isNaN(t)) return null;
-    const d = new Date(t);
-    if (d.getUTCMonth() !== +m[2] - 1 || d.getUTCDate() !== +m[3]) return null;
+    if (+(m[4] || 0) > 23 || +(m[5] || 0) > 59 || +(m[6] || 0) > 59) return null;
+    // setUTCFullYear keeps years below 100 as written; Date.UTC would read 0001 as 1901.
+    const d = new Date(Date.UTC(2000, 0, 1, +(m[4] || 0), +(m[5] || 0), +(m[6] || 0)));
+    d.setUTCFullYear(+m[1], +m[2] - 1, +m[3]);
+    const t = d.getTime();
+    if (isNaN(t) || d.getUTCFullYear() !== +m[1] || d.getUTCMonth() !== +m[2] - 1 || d.getUTCDate() !== +m[3]) return null;
     return { t, time: m[4] !== undefined };
   }
 

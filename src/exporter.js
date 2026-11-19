@@ -11,7 +11,7 @@
 
   function isoFromMs(t, withTime) {
     const d = new Date(t);
-    const s = d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate());
+    const s = String(d.getUTCFullYear()).padStart(4, '0') + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate());
     return withTime ? s + ' ' + pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes()) + ':' + pad(d.getUTCSeconds()) : s;
   }
 
@@ -21,7 +21,8 @@
   }
 
   // Full value for pivots and further math, trimmed to 15 significant digits to drop floating-point noise.
-  function fullValue(v) { return Number(v.toPrecision(15)); }
+  // Whole numbers are already exact, so they are left as they are.
+  function fullValue(v) { return Number.isInteger(v) ? v : Number(v.toPrecision(15)); }
 
   // snap.value(col, rowIndex) -> { kind: 'num'|'date'|'text'|'null', v, time }
   function csvCell(cell, col) {

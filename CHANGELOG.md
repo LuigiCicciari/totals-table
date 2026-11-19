@@ -2,6 +2,17 @@
 
 All notable changes to Totals Table. Versions follow [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH, where a patch fixes bugs, a minor version adds features without breaking anything, and a major version changes something existing (read its notes before updating). The version in use shows when hovering the info icon in the table's toolbar.
 
+## 1.6.6 (2026-11-19)
+
+**Fixed**
+- Ratio rules matched by name no longer guess. When a rule's name fits more than one number column (for example SUM(Sales) and AVG(Sales), which both show as Sales), the total uses the one SUM among them, since a ratio of totals needs summed values, and authors see a note saying which. If there is no single SUM, the total stays blank and authors see why until the fields are chosen in Format. Before, the first column found was used. Ratios picked in Format and rules that name the full field are unchanged.
+- Dates written as text are checked strictly: times such as 12:61 or 24:00 stay as text instead of rolling over to the next hour or day, and years below 100 keep their value instead of being read as 19xx.
+- Ratio rules that name the full field (for example "Orders" when a column's field is exactly Orders) pick that column whatever the column order, and the author note lists both sides when both were chosen this way. A ratio picked in Format must use number columns; a saved choice pointing at a text column leaves the total blank with a reason.
+- Headers from parameters: a dotted prefix only counts when at least two parameters share it, so a single parameter such as "Target.Sales" no longer takes over a "Sales" column. Once a prefixed parameter is chosen for any column, Auto only uses that prefix, including for a column that has just one prefixed match.
+- CSV downloads keep whole numbers exact. Numbers with more than 15 digits were trimmed (1234567890123456 came out as 1234567890123460).
+
+Note: Excel can't show dates before 1900, so such dates show as ##### in an Excel download. The CSV keeps them.
+
 ## 1.6.5 (2026-11-18)
 
 **Fixed**
