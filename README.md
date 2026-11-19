@@ -66,6 +66,15 @@ A fast table for Tableau worksheets, with correct totals for ratio columns, head
 - Collapsed subtotal groups never hide rows from a download. In Excel, subtotal rows sit above their rows, grouped with Excel's +/- outline (one outline level per subtotal level, so Excel's 1 2 3 buttons collapse to each level), and groups collapsed in the table start collapsed in the file
 - File name template with `{sheet}`, `{date}`, `{time}` and `{param:Parameter Name}`
 
+**Keyboard and screen readers**
+- The table is one Tab stop (the filter boxes, when shown, are their own Tab stops). Arrow keys move between cells, Home and End go to the start and end of a row, Ctrl+Home and Ctrl+End to the first and last cell, and Page Up and Page Down move a page at a time
+- On a header, Enter sorts (Shift+Enter adds the column as the next sort) and Alt+Down Arrow opens the column's menu. On a group header, Enter opens its menu
+- On a filter cell, start typing or press Enter to use the filter box. Enter goes back to the table, as do Up and Down in a text box and Esc in an empty box (number boxes keep Up and Down for stepping)
+- On a row, Space selects it like a click (Ctrl+Space adds to the selection), Enter opens and closes a subtotal or Other row and opens a link, and Shift with the arrow keys highlights cells to copy with Ctrl+C. Shift+F10 or the Menu key opens the cell menu (Keep only, Exclude, copy)
+- Menus move with the arrow keys, and Esc closes them and returns to where you were
+- Screen readers hear a grid with column headers, row and column positions, sort direction, selected rows and open or closed groups. Sorting, opening and closing groups, row counts and copies are announced
+- The focus outline shows only while the keyboard is in use. Clicking, dragging and menus work as before; after clicking in the table, the arrow keys and Space act on cells, as in a spreadsheet, instead of scrolling
+
 **Viewer layouts**
 - When "Let viewers move, hide, resize and freeze columns" is on, a viewer's changes (column order, hidden columns, widths, names, freeze, sort, subtotals, % of total columns, hidden formatting, hidden group headers and weighted-average choices) are saved in their own browser only. A "Custom layout · Reset" chip appears so they can return to the published layout
 - Saved layouts: viewers can save named layouts (for example "Weekly review" or "Top regions") from the Layouts button and switch between them, update or undo changes to one, rename or delete it, or go back to the published layout. The chip shows which layout is active and whether it has been edited. A saved layout also remembers the parameters that decide what columns show (those linked to a column header or used by Hide when rules) and sets them again when it is chosen; date ranges and other parameters are never saved or changed

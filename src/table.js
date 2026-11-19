@@ -5,12 +5,13 @@
   const R = window.TPRules;
   const SETTINGS_KEY = 'tp-config';
   const OVERSCAN = 12;
+  const NAV_KEYS = new Set(['Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown', 'Enter', ' ', 'F2', 'F10', 'ContextMenu']);
   const MIN_W = 48;
   const FREEZE_MAX = 0.6;
   const MAX_LEVELS = 3;
   const NUL = '\u0000null';
   // Semantic version (MAJOR.MINOR.PATCH); see CHANGELOG.md. The ?v= tags in the HTML are only for browser caches.
-  const VERSION = '1.6.6';
+  const VERSION = '1.7.0';
   const calcKey = d => d.kind === 'rank' ? '__rank:' + (d.dir || 'desc') + ':' + d.src : d.kind === 'run' || d.kind === 'pgrp' ? '__' + d.kind + ':' + d.src : '__' + d.kind + ':' + d.src + '|' + d.other;
 
   function defaults() {
@@ -1027,13 +1028,15 @@
           <button class="tp-icon tp-gear" type="button" title="Format table" aria-label="Format table" hidden>${ICONS.gear}</button>
           <button class="tp-icon tp-info" type="button" aria-label="Load timing">${ICONS.info}</button>
         </div>
-        <div class="tp-scroll" tabindex="0">
-          <div class="tp-grid">
-            <div class="tp-top"><div class="tp-head"></div><div class="tp-tot tp-tot-top"></div></div>
-            <div class="tp-body"><div class="tp-pad"></div><div class="tp-rows"></div></div>
-            <div class="tp-tot tp-tot-bottom"></div>
+        <div class="tp-scroll" tabindex="0" role="grid" aria-multiselectable="true" aria-label="Table" aria-describedby="tp-kbhelp">
+          <div class="tp-grid" role="presentation">
+            <div class="tp-top" role="presentation"><div class="tp-head" role="rowgroup"></div><div class="tp-tot tp-tot-top" role="rowgroup"></div></div>
+            <div class="tp-body" role="presentation"><div class="tp-pad" aria-hidden="true"></div><div class="tp-rows" role="rowgroup"></div></div>
+            <div class="tp-tot tp-tot-bottom" role="rowgroup"></div>
           </div>
         </div>
+        <span id="tp-kbhelp" class="tp-sr">Arrow keys move between cells. Enter sorts a column, opens a column group's menu, or opens and closes a subtotal row. Space selects a row. Shift with arrow keys selects cells to copy. Alt+Down Arrow opens a column's menu, and Shift+F10 opens a cell's menu.</span>
+        <span class="tp-sr tp-say" aria-live="polite"></span>
         <div class="tp-pop" hidden></div>`;
       const q = s => this.el.querySelector(s);
       this.scroller = q('.tp-scroll');
@@ -1065,8 +1068,12 @@
       q('.tp-cols').addEventListener('click', e => this.openColumnsPicker(e.currentTarget));
       q('.tp-dl').addEventListener('click', e => this.onDownloadClick(e.currentTarget));
       q('.tp-gear').addEventListener('click', () => this.openFormat());
-      document.addEventListener('mousedown', e => { if (!this.pop.hidden && !this.pop.contains(e.target)) this.closePop(); });
-      document.addEventListener('keydown', e => this.onKey(e));
+      document.addEventListener('mousedown', e => { this.setKb(false); if (!this.pop.hidden && !this.pop.contains(e.target)) this.closePop(); });
+      document.addEventListener('keydown', e => { if (NAV_KEYS.has(e.key)) this.setKb(true); this.onKey(e); });
+      this.scroller.addEventListener('keydown', e => { if (e.target === this.scroller) this.onGridKey(e); });
+      this.scroller.addEventListener('focus', () => { if (!this.kc) this.kc = { k: this.navPre().indexOf('h'), c: 0 }; this.syncActive(); });
+      this.scroller.addEventListener('blur', () => this.syncActive());
+      this.sayEl = q('.tp-say');
       // Any native drag would hand text to Tableau, which tries to open it as a new data source.
       document.addEventListener('dragstart', e => e.preventDefault());
       this.wireHead();
@@ -1096,7 +1103,7 @@
         if (this.search) text = (shown ? shown.toLocaleString() + (shown === 1 ? ' row matches' : ' rows match') : 'No rows match') + ' "' + this.search + '"' + (shown ? ' (of ' + st.n.toLocaleString() + ')' : '');
         if (!st.complete) text = 'Loading ' + st.n.toLocaleString() + ' of ' + (st.total || 0).toLocaleString() + '…';
       }
-      this.statusEl.textContent = text || '';
+      if (this.statusEl.textContent !== (text || '')) this.statusEl.textContent = text || '';
       // One chip per column filtered with Keep only / Exclude; clicking it removes that filter.
       const chips = [];
       if (st) {
@@ -1144,7 +1151,7 @@
 
     negCls(c, v) { return c.spec && c.spec.red && v < 0 ? ' neg' : ''; }
 
-    cellAttrs(c, extra, extraStyle) {
+    cellAttrs(c, extra, extraStyle, role) {
       let cls = 'tp-c' + (c.isNum ? ' num' : '') + (c.cls || '') + (extra ? ' ' + extra : '');
       let style = extraStyle || '';
       if (c.frozen) {
@@ -1152,7 +1159,7 @@
         style = 'left:' + c.left + 'px;' + style;
         if (c === this.view.cols[this.view.nFrozen - 1]) cls += ' fz-edge';
       }
-      return `class="${cls}"` + (style ? ` style="${style}"` : '');
+      return `role="${role || 'gridcell'}" class="${cls}"` + (style ? ` style="${style}"` : '');
     }
 
     // ---------- conditional formatting ----------
@@ -1283,19 +1290,21 @@
       const sorts = this.sortList().filter(s => cols.some(c => c.key === s.key));
       const canEdit = this.canEditLayout();
       let h = '';
+      const pre = this.navPre();
+      const ri = t => ` role="row" aria-rowindex="${pre.indexOf(t) + 1}"`;
       if (this.view.spans) {
-        h += '<div class="tp-grow">';
+        h += `<div class="tp-grow"${ri('g')}>`;
         for (const s of this.view.spans) {
           const c0 = cols[s.start];
           const cls = 'tp-c tp-g' + (s.label ? (canEdit ? ' mv' : '') : ' empty') + (s.frozen ? ' fz' : '') + (s.frozen && s.end === this.view.nFrozen - 1 ? ' fz-edge' : '');
           const style = `grid-column:${s.start + 1} / ${s.end + 2};` + (s.frozen ? 'left:' + c0.left + 'px;' : '');
-          h += `<div class="${cls}" style="${style}" data-s="${s.start}" data-e="${s.end}"` +
-            (s.label ? ` title="${esc(s.label + (canEdit ? '\nDrag to move this group' : ''))}">` +
-              `<span class="tp-gl">${esc(s.label)}</span><button class="tp-hm tp-gm" type="button" data-s="${s.start}" aria-label="Group menu for ${esc(s.label)}">▾</button>` : '>') + '</div>';
+          h += `<div role="columnheader" aria-colspan="${s.end - s.start + 1}" class="${cls}" style="${style}" data-s="${s.start}" data-e="${s.end}"` +
+            (s.label ? ` aria-label="${esc(s.label)}" title="${esc(s.label + (canEdit ? '\nDrag to move this group' : ''))}">` +
+              `<span class="tp-gl">${esc(s.label)}</span><button class="tp-hm tp-gm" type="button" tabindex="-1" data-s="${s.start}" aria-label="Group menu for ${esc(s.label)}">▾</button>` : '>') + '</div>';
         }
         h += '</div>';
       }
-      h += '<div class="tp-hrow">';
+      h += `<div class="tp-hrow"${ri('h')}>`;
       cols.forEach((c, i) => {
         const si = sorts.findIndex(s => s.key === c.key);
         const sort = sorts[si];
@@ -1305,14 +1314,15 @@
           : '\nClick to sort';
         const how = this.formulaLine(c);
         const p = this.paramFor(c);
-        h += `<div ${this.cellAttrs(c, 'tp-h')} data-i="${i}" title="${esc(c.label + (p && this.authoring ? ' (from parameter ' + p.name + ')' : '') + (how ? '\n' + how : '') + sortTip)}">` +
-          `<span class="tp-hl">${esc(c.label)}${arrow}</span>` +
-          `<button class="tp-hm" type="button" data-i="${i}" aria-label="Column menu for ${esc(c.label)}">▾</button>` +
+        const ariaSort = sort ? ` aria-sort="${sort.dir === 'desc' ? 'descending' : 'ascending'}"` : '';
+        h += `<div ${this.cellAttrs(c, 'tp-h', '', 'columnheader')} data-i="${i}" aria-label="${esc(c.label + (sort && sorts.length > 1 ? ', sort ' + (si + 1) + ' of ' + sorts.length : ''))}"${ariaSort} title="${esc(c.label + (p && this.authoring ? ' (from parameter ' + p.name + ')' : '') + (how ? '\n' + how : '') + sortTip)}">` +
+          `<span class="tp-hl">${esc(c.label)}<span aria-hidden="true">${arrow}</span></span>` +
+          `<button class="tp-hm" type="button" tabindex="-1" data-i="${i}" aria-label="Column menu for ${esc(c.label)}">▾</button>` +
           (canEdit ? `<span class="tp-rz" data-i="${i}"></span>` : '') + '</div>';
       });
       h += '</div>';
       if (this.cfg.showFilters) {
-        h += '<div class="tp-frow">';
+        h += `<div class="tp-frow"${ri('f')}>`;
         cols.forEach((c, i) => {
           const f = this.filters[c.key] || {};
           if (c.virtual) { h += `<div ${this.cellAttrs(c, 'tp-f')}></div>`; return; }
@@ -1329,6 +1339,7 @@
         const fz = document.createElement('span');
         fz.className = 'tp-fzh' + (n ? '' : ' at-start');
         fz.title = 'Drag to change frozen columns';
+        fz.setAttribute('aria-hidden', 'true');
         host.appendChild(fz);
       }
 
@@ -1337,12 +1348,14 @@
       const totHtml = show ? this.totalsHtml(totals, 'Total', 'tp-trow') : '';
       this.totTop.innerHTML = loc === 'top' ? totHtml : '';
       this.totBottom.innerHTML = loc === 'bottom' ? totHtml : '';
+      this.syncActive();
     }
 
     totalsHtml(tot, label, cls) {
       const { cols } = this.view;
       const loading = !this.store.complete;
-      let h = `<div class="${cls}">`;
+      const k = this.cfg.totals.location === 'top' ? this.navPre().indexOf('tt') : this.navPre().length + this.view.disp.length;
+      let h = `<div class="${cls}" role="row" aria-rowindex="${k + 1}">`;
       cols.forEach(c => {
         if (c.key === tot.__label || (!tot.__label && c === cols[0] && !c.isNum)) {
           h += `<div ${this.cellAttrs(c)}>${esc(label)}</div>`;
@@ -1389,14 +1402,15 @@
         while ((k = lo.indexOf(q, at)) >= 0) { out += esc(v.slice(at, k)) + '<mark>' + esc(v.slice(k, k + q.length)) + '</mark>'; at = k + q.length; }
         return out + esc(v.slice(at));
       };
+      const base = this.navPre().length + 1;
       let h = '';
       for (let r = start; r < end; r++) {
         const d = disp[r];
         if (typeof d === 'object') {
           const open = d.isOther ? this.otherOpen.has(d.key) : !this.isCollapsed(d);
-          h += `<div class="tp-row tp-grp l${d.level}${d.isOther ? ' tp-other' : ''}" data-r="${r}">`;
+          h += `<div class="tp-row tp-grp l${d.level}${d.isOther ? ' tp-other' : ''}" role="row" aria-rowindex="${base + r}" data-r="${r}">`;
           cols.forEach((c, j) => {
-            if (c.key === d.colKey) h += `<div ${this.cellAttrs(c)} data-c="${j}"><span class="tp-caret">${open ? '▾' : '▸'}</span>${esc(d.label)} <span class="tp-cnt">(${d.rows.length.toLocaleString()})</span></div>`;
+            if (c.key === d.colKey) h += `<div ${this.cellAttrs(c)} aria-expanded="${open}" data-c="${j}"><span class="tp-caret" aria-hidden="true">${open ? '▾' : '▸'}</span>${esc(d.label)} <span class="tp-cnt">(${d.rows.length.toLocaleString()})</span></div>`;
             else if (c.isNum) {
               const gv = d.totals[c.key];
               const f = this.cellFormat(c, gv, true);
@@ -1408,7 +1422,7 @@
           continue;
         }
         const sel = st.tuple[d] != null && this.selected.has(st.tuple[d]);
-        h += `<div class="tp-row${sel ? ' sel' : ''}${r % 2 ? ' odd' : ''}" data-r="${r}">`;
+        h += `<div class="tp-row${sel ? ' sel' : ''}${r % 2 ? ' odd' : ''}" role="row" aria-rowindex="${base + r}"${sel ? ' aria-selected="true"' : ''} data-r="${r}">`;
         for (let j = 0; j < cols.length; j++) {
           const v = fmts[j][d];
           const inRange = rg && r >= rg.r0 && r <= rg.r1 && j >= rg.c0 && j <= rg.c1;
@@ -1416,15 +1430,20 @@
           let inner = v == null ? nulls[j] : this.cfInner(f, mark(j, v));
           const lk = links[j];
           const url = lk && this.safeUrl(lk.urls[d]);
-          if (url && (v != null || lk.label)) inner = `<a class="tp-link" href="${esc(url)}" target="_blank" rel="noopener noreferrer" title="${esc(url)}">${mark(j, lk.label || v)}</a>`;
+          if (url && (v != null || lk.label)) inner = `<a class="tp-link" tabindex="-1" href="${esc(url)}" target="_blank" rel="noopener noreferrer" title="${esc(url)}">${mark(j, lk.label || v)}</a>`;
           h += `<div ${this.cellAttrs(cols[j], (v == null ? 'nul' : '') + (inRange ? ' rg' : '') + (f ? ' cf' : '') + (reds[j] ? this.negCls(cols[j], st.raw[cols[j].key][d]) : ''), f && f.style)} data-c="${j}">${inner}</div>`;
         }
         h += '</div>';
       }
       if (!total && this.store.complete) {
-        h = `<div class="tp-empty">${this.store.n ? 'No rows match these filters. <button type="button" data-a="clear-filters">Clear filters</button>' : 'No rows to show.'}</div>`;
+        h = `<div class="tp-empty" role="row" aria-rowindex="${base}"><div role="gridcell">${this.store.n ? 'No rows match these filters. <button type="button" data-a="clear-filters">Clear filters</button>' : 'No rows to show.'}</div></div>`;
       }
       this.rowsEl.innerHTML = h;
+      const tb = this.totBottom.querySelector('.tp-trow');
+      if (tb) tb.setAttribute('aria-rowindex', this.navCount());
+      this.scroller.setAttribute('aria-rowcount', this.navCount() + (total ? 0 : 1));
+      this.scroller.setAttribute('aria-colcount', cols.length);
+      this.syncActive();
     }
 
     // ---------- header interactions ----------
@@ -1438,22 +1457,21 @@
         if (this.suppressClick || e.target.closest('.tp-rz,.tp-fzh,input')) return;
         const cell = e.target.closest('.tp-h');
         if (!cell) return;
-        const c = this.view.cols[+cell.dataset.i];
-        if (c.vkind === 'run') return this.flash('Running totals follow the row order, so they can\'t be sorted.');
-        const sorts = this.sortList();
-        const def = c.isNum ? 'desc' : 'asc', alt = c.isNum ? 'asc' : 'desc';
-        // Shift-click adds the column as the next sort, flips it, then takes it out again.
-        if (e.shiftKey && sorts.length) {
-          const next = sorts.slice();
-          const i = next.findIndex(s => s.key === c.key);
-          if (i < 0) next.push({ key: c.key, dir: def });
-          else if (next[i].dir === def) next[i] = { key: c.key, dir: alt };
-          else next.splice(i, 1);
-          return this.setSort(next.length ? next : null);
-        }
-        const s = sorts.length === 1 ? sorts[0] : null;
-        const next = !s || s.key !== c.key ? { key: c.key, dir: def } : s.dir === def ? { key: c.key, dir: alt } : null;
-        this.setSort(next ? [next] : null);
+        this.kc = { k: this.navPre().indexOf('h'), c: +cell.dataset.i };
+        this.sortByHeader(+cell.dataset.i, e.shiftKey);
+      });
+      this.head.addEventListener('keydown', e => {
+        // Filter boxes: Enter, Esc, Up and Down go back to moving around the table.
+        const inp = e.target.closest('input[data-i]');
+        if (!inp) return;
+        // Number boxes keep Up and Down for stepping, and Esc first clears a box that has text.
+        const upDown = (e.key === 'ArrowUp' || e.key === 'ArrowDown') && inp.type !== 'number';
+        if (!(e.key === 'Enter' || upDown || (e.key === 'Escape' && !inp.value))) return;
+        e.preventDefault();
+        this.kc = { k: this.navPre().indexOf('f'), c: +inp.dataset.i };
+        this.scroller.focus({ preventScroll: true });
+        if (e.key === 'ArrowUp' || e.key === 'ArrowDown') this.moveTo(this.kc.k + (e.key === 'ArrowUp' ? -1 : 1), this.kc.c);
+        else this.syncActive();
       });
       this.head.addEventListener('input', e => {
         const inp = e.target.closest('input[data-i]');
@@ -1469,7 +1487,7 @@
           this.renderTotalsOnly();
           this.renderBar();
           const again = this.head.querySelector(`input[data-i="${focusKey.split(':')[0]}"][data-k="${focusKey.split(':')[1]}"]`);
-          if (again && document.activeElement !== again) again.focus();
+          if (again && document.activeElement !== again && document.activeElement !== this.scroller) again.focus();
         }, 200);
       });
       this.head.addEventListener('dblclick', e => {
@@ -1487,6 +1505,26 @@
         const cell = e.target.closest('.tp-h');
         if (cell && this.canEditLayout()) this.startColumnDrag(e, +cell.dataset.i);
       });
+    }
+
+    // Click or Enter on a header sorts by it. With Shift it adds the column as the next sort, flips it, then takes it out again.
+    sortByHeader(i, shift) {
+      const c = this.view.cols[i];
+      if (!c) return;
+      if (c.vkind === 'run') return this.flash('Running totals follow the row order, so they can\'t be sorted.');
+      const sorts = this.sortList();
+      const def = c.isNum ? 'desc' : 'asc', alt = c.isNum ? 'asc' : 'desc';
+      if (shift && sorts.length) {
+        const next = sorts.slice();
+        const at = next.findIndex(s => s.key === c.key);
+        if (at < 0) next.push({ key: c.key, dir: def });
+        else if (next[at].dir === def) next[at] = { key: c.key, dir: alt };
+        else next.splice(at, 1);
+        return this.setSort(next.length ? next : null);
+      }
+      const s = sorts.length === 1 ? sorts[0] : null;
+      const next = !s || s.key !== c.key ? { key: c.key, dir: def } : s.dir === def ? { key: c.key, dir: alt } : null;
+      this.setSort(next ? [next] : null);
     }
 
     // Pointer-based dragging; native HTML drag-and-drop hands text to Tableau, which tries to open it as a data file.
@@ -1570,11 +1608,14 @@
       const html = show ? this.totalsHtml(this.view.totals, 'Total', 'tp-trow') : '';
       this.totTop.innerHTML = this.cfg.totals.location === 'top' ? html : '';
       this.totBottom.innerHTML = this.cfg.totals.location === 'bottom' ? html : '';
+      this.syncActive();
     }
 
     // Sorting always works; when viewers can't change the layout it lasts only for this session.
     setSort(sort) {
       this.range = null;
+      const name = s => { const c = this.colDef(s.key); return c ? this.labelFor(c) + (c.isNum ? (s.dir === 'desc' ? ', largest first' : ', smallest first') : (s.dir === 'desc' ? ', Z to A' : ', A to Z')) : ''; };
+      this.say(sort && sort.length ? 'Sorted by ' + sort.map(name).filter(Boolean).join(', then ') : 'Sort cleared');
       if (this.canEditLayout()) return this.updateLayout({ sort });
       this.sessionSort = sort;
       this.refresh();
@@ -1731,6 +1772,7 @@
         this.dragStart = null;
         if (!ds || ds.moved || e.shiftKey) { this.renderBody(true); return; }
         this.range = { r0: ds.r, c0: ds.c, r1: ds.r, c1: ds.c };
+        this.kc = { k: this.navPre().length + ds.r, c: ds.c };
         this.clickRow(ds.r, e.ctrlKey || e.metaKey, { x: e.clientX, y: e.clientY });
       });
       this.rowsEl.addEventListener('mouseleave', () => this.unhover());
@@ -1749,34 +1791,38 @@
         e.preventDefault();
         const r = this.rowAt(e.target);
         const cell = e.target.closest('[data-c]');
-        const rg = this.normRange();
-        if (r >= 0 && cell && !(rg && r >= rg.r0 && r <= rg.r1 && +cell.dataset.c >= rg.c0 && +cell.dataset.c <= rg.c1)) {
-          this.range = { r0: r, c0: +cell.dataset.c, r1: r, c1: +cell.dataset.c };
-          this.renderBody(true);
-        }
-        const g = this.normRange();
-        const n = g ? (g.r1 - g.r0 + 1) * (g.c1 - g.c0 + 1) : 0;
-        const what = n > 1 ? 'Copy ' + n.toLocaleString() + ' cells' : 'Copy cell';
-        const x = e.clientX, y = e.clientY;
-        const pick = this.pickedValues();
-        const short = s => s.length > 30 ? s.slice(0, 29) + '…' : s;
-        const shown = pick && (pick.values.length === 1 ? '"' + short(this.valueText(pick.col, pick.values[0])) + '"' : pick.values.length + ' values');
-        const html = '<div class="tp-menu" role="menu">' +
-          (pick ? `<button type="button" data-v="keep">Keep only ${esc(shown)}</button><button type="button" data-v="exclude">Exclude ${esc(shown)}</button><hr>` : '') +
-          `<button type="button" data-m="cells">${what}</button>` +
-          '<button type="button" data-m="headers">Copy with headers</button><hr>' +
-          `<button type="button" data-m="all">Copy whole table (${this.view.idx.length.toLocaleString()} rows)</button></div>`;
-        this.openPop({ getBoundingClientRect: () => ({ left: x, bottom: y }) }, html, pop => pop.addEventListener('click', ev => {
-          const v = ev.target.closest('button[data-v]');
-          if (v) { this.closePop(); return this.valueFilter(pick, v.dataset.v); }
-          const b = ev.target.closest('button[data-m]');
-          if (!b) return;
-          this.closePop();
-          const text = this.copyText(b.dataset.m);
-          if (text) this.copyToClipboard(text, b.dataset.m === 'all' ? this.view.idx.length : null);
-        }));
+        this.openCellMenu(r, cell ? +cell.dataset.c : -1, e.clientX, e.clientY);
       });
       this.el.addEventListener('contextmenu', e => { if (!e.target.closest('input, textarea')) e.preventDefault(); });
+    }
+
+    // The right-click menu for a body cell (also Shift+F10 or the Menu key): Keep only, Exclude and the copy options.
+    openCellMenu(r, ci, x, y) {
+      const rg = this.normRange();
+      if (r >= 0 && ci >= 0 && !(rg && r >= rg.r0 && r <= rg.r1 && ci >= rg.c0 && ci <= rg.c1)) {
+        this.range = { r0: r, c0: ci, r1: r, c1: ci };
+        this.renderBody(true);
+      }
+      const g = this.normRange();
+      const n = g ? (g.r1 - g.r0 + 1) * (g.c1 - g.c0 + 1) : 0;
+      const what = n > 1 ? 'Copy ' + n.toLocaleString() + ' cells' : 'Copy cell';
+      const pick = this.pickedValues();
+      const short = s => s.length > 30 ? s.slice(0, 29) + '…' : s;
+      const shown = pick && (pick.values.length === 1 ? '"' + short(this.valueText(pick.col, pick.values[0])) + '"' : pick.values.length + ' values');
+      const html = '<div class="tp-menu" role="menu">' +
+        (pick ? `<button type="button" data-v="keep">Keep only ${esc(shown)}</button><button type="button" data-v="exclude">Exclude ${esc(shown)}</button><hr>` : '') +
+        `<button type="button" data-m="cells">${what}</button>` +
+        '<button type="button" data-m="headers">Copy with headers</button><hr>' +
+        `<button type="button" data-m="all">Copy whole table (${this.view.idx.length.toLocaleString()} rows)</button></div>`;
+      this.openPop({ getBoundingClientRect: () => ({ left: x, bottom: y }) }, html, pop => pop.addEventListener('click', ev => {
+        const v = ev.target.closest('button[data-v]');
+        if (v) { this.closePop(); return this.valueFilter(pick, v.dataset.v); }
+        const b = ev.target.closest('button[data-m]');
+        if (!b) return;
+        this.closePop();
+        const text = this.copyText(b.dataset.m);
+        if (text) this.copyToClipboard(text, b.dataset.m === 'all' ? this.view.idx.length : null);
+      }));
     }
 
     // ---------- keep only / exclude ----------
@@ -1889,8 +1935,200 @@
       Promise.resolve(this.ws.hoverTupleAsync(null)).catch(() => { /* ignore */ });
     }
 
+    // ---------- keyboard and screen readers ----------
+    // The table is one Tab stop (the scroller, role grid). The active cell is tracked as kc = { k, c }: k counts rows
+    // top to bottom (group headers, headers, filters, top totals, body rows, bottom totals), c is the column. Screen
+    // readers follow it through aria-activedescendant, so it survives rows being redrawn while scrolling.
+
+    setKb(on) {
+      if (this.kbMode === on) return;
+      this.kbMode = on;
+      if (this.store) this.syncActive();
+    }
+
+    say(msg) {
+      clearTimeout(this.sayT);
+      this.sayEl.textContent = '';
+      this.sayT = setTimeout(() => { this.sayEl.textContent = msg; }, 60);
+    }
+
+    totalsShown() { return this.cfg.totals.show && this.view.cols.some(c => c.isNum); }
+
+    navPre() {
+      const a = [];
+      if (this.view.spans) a.push('g');
+      a.push('h');
+      if (this.cfg.showFilters) a.push('f');
+      if (this.totalsShown() && this.cfg.totals.location === 'top') a.push('tt');
+      return a;
+    }
+
+    navCount() { return this.navPre().length + this.view.disp.length + (this.totalsShown() && this.cfg.totals.location === 'bottom' ? 1 : 0); }
+
+    navKind(k) {
+      const pre = this.navPre();
+      if (k < pre.length) return { t: pre[k] };
+      const r = k - pre.length;
+      return r < this.view.disp.length ? { t: 'b', r } : { t: 'tb' };
+    }
+
+    spanAt(c) { return (this.view.spans || []).find(s => c >= s.start && c <= s.end) || null; }
+
+    cellEl(k, c) {
+      const kind = this.navKind(k);
+      switch (kind.t) {
+        case 'g': { const s = this.spanAt(c); return s ? this.head.querySelector(`.tp-grow > [data-s="${s.start}"]`) : null; }
+        case 'h': return this.head.querySelector(`.tp-hrow > [data-i="${c}"]`);
+        case 'f': { const row = this.head.querySelector('.tp-frow'); return row ? row.children[c] || null : null; }
+        case 'tt': case 'tb': { const row = (kind.t === 'tt' ? this.totTop : this.totBottom).querySelector('.tp-trow'); return row ? row.children[c] || null : null; }
+        default: return this.rowsEl.querySelector(`.tp-row[data-r="${kind.r}"] > [data-c="${c}"]`);
+      }
+    }
+
+    // Points aria-activedescendant at the active cell and shows its focus outline while the keyboard is in use.
+    syncActive() {
+      const sc = this.scroller;
+      if (this.activeEl) { this.activeEl.classList.remove('kb'); this.activeEl.removeAttribute('id'); this.activeEl = null; }
+      const n = this.navCount(), nc = this.view.cols.length;
+      const pre = this.navPre();
+      if (this.kc && this.kcPre && this.kcPre.join() !== pre.join()) {
+        const was = this.kc.k < this.kcPre.length ? this.kcPre[this.kc.k] : null;
+        const at = was ? pre.indexOf(was) : -1;
+        this.kc = { k: was ? (at >= 0 ? at : pre.indexOf('h')) : this.kc.k - this.kcPre.length + pre.length, c: this.kc.c };
+      }
+      this.kcPre = pre;
+      if (!this.kc || !n || !nc) { sc.removeAttribute('aria-activedescendant'); sc.classList.remove('has-ad'); return; }
+      this.kc = { k: Math.max(0, Math.min(n - 1, this.kc.k)), c: Math.max(0, Math.min(nc - 1, this.kc.c)) };
+      const el = this.cellEl(this.kc.k, this.kc.c);
+      if (!el) { sc.removeAttribute('aria-activedescendant'); sc.classList.remove('has-ad'); return; }
+      const id = 'tp-ad-' + this.kc.k + '-' + this.kc.c;
+      el.id = id;
+      if (this.kbMode && document.activeElement === sc) el.classList.add('kb');
+      this.activeEl = el;
+      sc.setAttribute('aria-activedescendant', id);
+      sc.classList.add('has-ad');
+    }
+
+    // Scrolls the active cell into view past the sticky header, totals and frozen columns, then draws it.
+    revealActive() {
+      const sc = this.scroller, { k, c } = this.kc;
+      const kind = this.navKind(k);
+      if (kind.t === 'b') {
+        const rowH = this.rowH || 26;
+        const y = this.body.offsetTop + kind.r * rowH;
+        const topH = this.el.querySelector('.tp-top').offsetHeight;
+        const botH = this.totBottom.offsetHeight;
+        if (y < sc.scrollTop + topH) sc.scrollTop = y - topH;
+        else if (y + rowH > sc.scrollTop + sc.clientHeight - botH) sc.scrollTop = y + rowH - sc.clientHeight + botH;
+      }
+      const cols = this.view.cols;
+      const s = kind.t === 'g' ? this.spanAt(c) : null;
+      const c0 = s ? s.start : c;
+      if (cols[c0] && !cols[c0].frozen) {
+        let x = 0;
+        for (let j = 0; j < c0; j++) x += cols[j].w;
+        const w = s ? cols.slice(s.start, s.end + 1).reduce((a, col) => a + col.w, 0) : cols[c].w;
+        const fw = this.frozenWidth || 0;
+        if (x < sc.scrollLeft + fw) sc.scrollLeft = x - fw;
+        else if (x + w > sc.scrollLeft + sc.clientWidth) sc.scrollLeft = Math.min(x - fw, x + w - sc.clientWidth);
+      }
+      this.renderBody(false);
+      this.syncActive();
+    }
+
+    moveTo(k, c, extend) {
+      const n = this.navCount(), nc = this.view.cols.length;
+      if (!n || !nc) return;
+      k = Math.max(0, Math.min(n - 1, k));
+      c = Math.max(0, Math.min(nc - 1, c));
+      const pre = this.navPre().length;
+      const was = this.kc;
+      this.kc = { k, c };
+      const inBody = kk => kk >= pre && kk < pre + this.view.disp.length;
+      if (extend && inBody(k) && was && inBody(was.k)) {
+        const a = this.range ? { r0: this.range.r0, c0: this.range.c0 } : { r0: was.k - pre, c0: was.c };
+        this.range = { r0: a.r0, c0: a.c0, r1: k - pre, c1: c };
+        this.renderBody(true);
+      } else if (this.range) {
+        this.range = null;
+        this.renderBody(true);
+      }
+      this.revealActive();
+    }
+
+    onGridKey(e) {
+      if (!this.store || !this.view.cols.length) return;
+      if (!this.kc) this.kc = { k: this.navPre().indexOf('h'), c: 0 };
+      const { k, c } = this.kc;
+      const kind = this.navKind(k);
+      const last = this.view.cols.length - 1;
+      const ctrl = e.ctrlKey || e.metaKey;
+      const span = kind.t === 'g' ? this.spanAt(c) : null;
+      const page = Math.max(1, Math.floor((this.scroller.clientHeight - this.el.querySelector('.tp-top').offsetHeight - this.totBottom.offsetHeight) / (this.rowH || 26)) - 1);
+      let handled = true;
+      if ((e.altKey && e.key === 'ArrowDown') || e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) this.menuAtActive();
+      else if (e.key === 'ArrowRight') this.moveTo(k, span ? span.end + 1 : c + 1, e.shiftKey);
+      else if (e.key === 'ArrowLeft') { const s = span && this.spanAt(span.start - 1); this.moveTo(k, span ? (s ? s.start : span.start) : c - 1, e.shiftKey); }
+      else if (e.key === 'ArrowDown') this.moveTo(k + 1, c, e.shiftKey);
+      else if (e.key === 'ArrowUp') this.moveTo(k - 1, c, e.shiftKey);
+      else if (e.key === 'Home') this.moveTo(ctrl ? 0 : k, 0, e.shiftKey);
+      else if (e.key === 'End') this.moveTo(ctrl ? this.navCount() - 1 : k, last, e.shiftKey);
+      else if (e.key === 'PageDown') this.moveTo(k + page, c, e.shiftKey);
+      else if (e.key === 'PageUp') this.moveTo(k - page, c, e.shiftKey);
+      else if (e.key === 'Enter' || e.key === ' ' || e.key === 'F2') this.activateCell(e);
+      else if (kind.t === 'f' && e.key.length === 1 && !ctrl && !e.altKey) { this.focusFilter(c); handled = false; }
+      else handled = false;
+      if (handled) e.preventDefault();
+    }
+
+    focusFilter(c) {
+      const cell = this.cellEl(this.navPre().indexOf('f'), c);
+      const inp = cell && cell.querySelector('input');
+      if (inp) inp.focus();
+    }
+
+    activateCell(e) {
+      const { k, c } = this.kc;
+      const kind = this.navKind(k);
+      if (kind.t === 'h') { if (e.key !== 'F2') this.sortByHeader(c, e.shiftKey); return; }
+      if (kind.t === 'g') return this.menuAtActive();
+      if (kind.t === 'f') return this.focusFilter(c);
+      if (kind.t !== 'b') return;
+      const d = this.view.disp[kind.r];
+      if (typeof d === 'object') {
+        if (e.key === 'F2') return;
+        const wasOpen = d.isOther ? this.otherOpen.has(d.key) : !this.isCollapsed(d);
+        this.clickRow(kind.r);
+        return this.say((wasOpen ? 'Collapsed ' : 'Expanded ') + d.label);
+      }
+      const link = this.activeEl && this.activeEl.querySelector('a.tp-link');
+      if (link && e.key === 'Enter') return link.click();
+      if (e.key === 'F2') return;
+      const rect = this.activeEl ? this.activeEl.getBoundingClientRect() : null;
+      this.range = { r0: kind.r, c0: c, r1: kind.r, c1: c };
+      this.clickRow(kind.r, e.ctrlKey || e.metaKey, rect ? { x: rect.left + 8, y: rect.bottom } : null);
+      const tid = this.store.tuple[d];
+      const n = this.selected.size;
+      this.say(tid != null && this.selected.has(tid) ? 'Row selected' + (n > 1 ? ', ' + n + ' selected' : '') : n ? n + ' selected' : 'Selection cleared');
+    }
+
+    // Opens the menu for the active cell: a column or group header's menu, or a body cell's right-click menu.
+    menuAtActive() {
+      const { k, c } = this.kc;
+      const kind = this.navKind(k);
+      if (!this.activeEl) this.revealActive();
+      const el = this.activeEl;
+      if (!el) return;
+      if (kind.t === 'h') { const b = el.querySelector('.tp-hm'); if (b) this.openColumnMenu(c, b); }
+      else if (kind.t === 'g') { const b = el.querySelector('.tp-gm'); if (b) this.openGroupMenu(+b.dataset.s, b); }
+      else if (kind.t === 'b') { const r = el.getBoundingClientRect(); this.openCellMenu(kind.r, c, r.left + 8, r.bottom); }
+    }
+
     onKey(e) {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && !e.target.closest('input')) {
+        // From the keyboard with nothing highlighted, the active cell is copied.
+        const kind = this.kc && this.navKind(this.kc.k);
+        if (!this.range && this.kbMode && !this.selected.size && kind && kind.t === 'b' && e.target === this.scroller) this.range = { r0: kind.r, c0: this.kc.c, r1: kind.r, c1: this.kc.c };
         const text = this.copyText();
         if (!text) return;
         e.preventDefault();
@@ -1965,6 +2203,7 @@
     }
 
     copyViaTextarea(text) {
+      const back = document.activeElement;
       const ta = document.createElement('textarea');
       ta.value = text;
       ta.setAttribute('readonly', '');
@@ -1974,6 +2213,7 @@
       let ok = false;
       try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
       ta.remove();
+      if (back && back !== document.body && back.isConnected) back.focus({ preventScroll: true });
       return ok;
     }
 
@@ -2365,6 +2605,8 @@
     // ---------- popups ----------
 
     openPop(anchor, html, wire) {
+      // Focus goes back here when the popup closes. A popup opened from another keeps the first one's return point.
+      if (this.pop.hidden) this.popReturn = document.activeElement;
       // A fresh element each time, so listeners from earlier menus can't fire again.
       const fresh = this.pop.cloneNode(false);
       this.pop.replaceWith(fresh);
@@ -2376,11 +2618,30 @@
       this.pop.style.left = Math.max(4, Math.min(r.left, window.innerWidth - pw - 4)) + 'px';
       this.pop.style.top = Math.max(4, Math.min(r.bottom + 2, window.innerHeight - ph - 4)) + 'px';
       wire(this.pop);
+      // Up and Down move between a menu's buttons; Tab still moves through everything.
+      this.pop.addEventListener('keydown', e => {
+        if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key) || !e.target.matches('button')) return;
+        const items = Array.from(this.pop.querySelectorAll('button:not([disabled])')).filter(b => b.offsetParent);
+        const at = items.indexOf(e.target);
+        if (at < 0) return;
+        e.preventDefault();
+        const to = e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1 : (at + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+        items[to].focus();
+      });
       const first = this.pop.querySelector('button,input');
       if (first) first.focus();
     }
 
-    closePop() { this.pop.hidden = true; this.pop.innerHTML = ''; }
+    closePop() {
+      const wasOpen = !this.pop.hidden;
+      const hadFocus = wasOpen && (this.pop.contains(document.activeElement) || document.activeElement === document.body);
+      this.pop.hidden = true;
+      this.pop.innerHTML = '';
+      if (!hadFocus) return;
+      const back = this.popReturn && this.popReturn.isConnected && this.popReturn !== document.body ? this.popReturn : this.scroller;
+      // A header menu button is redrawn by most menu actions, so the table itself takes focus instead.
+      (back.closest && back.closest('.tp-head') ? this.scroller : back).focus({ preventScroll: true });
+    }
 
     openColumnMenu(i, anchor) {
       const c = this.view.cols[i];

@@ -2,6 +2,19 @@
 
 All notable changes to Totals Table. Versions follow [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH, where a patch fixes bugs, a minor version adds features without breaking anything, and a major version changes something existing (read its notes before updating). The version in use shows when hovering the info icon in the table's toolbar.
 
+## 1.7.0 (2026-11-19)
+
+**Added**
+- Keyboard support for the table. It is one Tab stop (plus the filter boxes when the filter row is on): arrow keys, Home, End, Ctrl+Home, Ctrl+End, Page Up and Page Down move between cells, including the group header, header, filter and totals rows. Enter sorts a header (Shift+Enter adds a sort), Alt+Down Arrow opens a column or group menu, Space selects a row (Ctrl+Space adds to the selection), Enter opens and closes subtotal and Other rows and opens links, Shift with the arrow keys highlights cells, Ctrl+C copies them (or the current cell when nothing is highlighted or selected), and Shift+F10 or the Menu key opens the cell menu.
+- Menus move with the arrow keys, and closing one returns focus to where it was opened.
+- Screen readers: the table is a grid with column headers, row and column positions for every row (even when only part of a large table is drawn), sort direction, selected rows and open or closed groups. Sorting and opening or closing groups are announced, as row counts and copies already were. Header menu buttons and links are no longer separate Tab stops.
+
+**Changed**
+- Clicking, dragging, menus and the look of the table are unchanged, and the focus outline appears only while the keyboard is in use. After clicking in the table, the arrow keys and Page Up/Down move the current cell (scrolling with it) instead of only scrolling, and Space selects the row, which sends the selection to the dashboard like a click. Drawing while scrolling takes about 0.5 ms longer on a 40,000-row test table (3.0 ms instead of 2.5 ms); full redraws are unchanged.
+
+**Fixed**
+- Copying no longer leaves keyboard focus nowhere.
+
 ## 1.6.6 (2026-11-19)
 
 **Fixed**

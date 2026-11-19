@@ -168,3 +168,7 @@ button, input, select { font: inherit; color: inherit; }
 /* Search matches: a fill plus an underline, so they don't depend on color alone. */
 .tp-c mark { background: #FFE58A; color: inherit; border-radius: 2px; box-shadow: inset 0 -2px 0 #9A6B00; }
 .tp-wnote { margin: 6px 8px 0; max-width: 260px; color: var(--tp-muted); font-size: 11px; white-space: normal; }
+
+/* Keyboard: the table is one Tab stop and the active cell shows the focus ring. Screen-reader-only text. */
+.tp-scroll.has-ad:focus-visible { outline: none; }
+.tp-c.kb, .tp-g.kb { outline: 2px solid var(--tp-accent); outline-offset: -2px; }
