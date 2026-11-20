@@ -5,13 +5,14 @@
   const R = window.TPRules;
   const SETTINGS_KEY = 'tp-config';
   const OVERSCAN = 12;
+  const UNIT = { K: 1e3, M: 1e6, B: 1e9 };
   const NAV_KEYS = new Set(['Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown', 'Enter', ' ', 'F2', 'F10', 'ContextMenu']);
   const MIN_W = 48;
   const FREEZE_MAX = 0.6;
   const MAX_LEVELS = 3;
   const NUL = '\u0000null';
   // Semantic version (MAJOR.MINOR.PATCH); see CHANGELOG.md. The ?v= tags in the HTML are only for browser caches.
-  const VERSION = '1.7.0';
+  const VERSION = '1.7.1';
   const calcKey = d => d.kind === 'rank' ? '__rank:' + (d.dir || 'desc') + ':' + d.src : d.kind === 'run' || d.kind === 'pgrp' ? '__' + d.kind + ':' + d.src : '__' + d.kind + ':' + d.src + '|' + d.other;
 
   function defaults() {
@@ -50,8 +51,10 @@
 
   function mergeConfig(saved) {
     const d = defaults();
-    if (!saved) return d;
-    const out = Object.assign(d, saved);
+    if (!saved || typeof saved !== 'object') return d;
+    // Copied key by key so a "__proto__" key in the saved JSON can't change the object's prototype.
+    const out = d;
+    for (const k of Object.keys(saved)) if (k !== '__proto__' && k !== 'constructor' && k !== 'prototype') out[k] = saved[k];
     out.nullText = Object.assign(defaults().nullText, saved.nullText);
     out.totals = Object.assign(defaults().totals, saved.totals);
     out.export = Object.assign(defaults().export, saved.export);
@@ -61,13 +64,30 @@
     const lay = saved.layout && typeof saved.layout === 'object' ? saved.layout : {};
     out.layout = Object.assign(defaults().layout, cleanLayout(lay));
     if (Array.isArray(lay.collapseLevels)) out.layout.collapseLevels = lay.collapseLevels.filter(x => typeof x === 'string');
-    out.headerLinks = saved.headerLinks || {};
-    out.totalOverrides = saved.totalOverrides || {};
-    out.links = saved.links || {};
-    out.cf = saved.cf || {};
-    out.colGroups = saved.colGroups || {};
-    out.colFormat = saved.colFormat || {};
-    out.hideWhen = saved.hideWhen || {};
+    // Maps of per-column settings must be plain objects; a bad entry is dropped rather than stopping the table.
+    const obj = v => v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+    const objMap = v => { const o = {}; for (const [k, x] of Object.entries(obj(v))) if (x && typeof x === 'object' && !Array.isArray(x) && k !== '__proto__') o[k] = x; return o; };
+    out.headerLinks = obj(saved.headerLinks);
+    out.totalOverrides = objMap(saved.totalOverrides);
+    out.links = objMap(saved.links);
+    out.cf = objMap(saved.cf);
+    out.colGroups = obj(saved.colGroups);
+    out.colFormat = objMap(saved.colFormat);
+    for (const f of Object.values(out.colFormat)) {
+      const n = Number(f.dec);
+      if ('dec' in f && f.dec !== '' && f.dec != null && !(Number.isInteger(n) && n >= 0 && n <= 20)) delete f.dec;
+    }
+    out.hideWhen = objMap(saved.hideWhen);
+    out.noneValues = Array.isArray(saved.noneValues) ? saved.noneValues.filter(x => typeof x === 'string') : defaults().noneValues;
+    // Totals rules are checked as on import; a rule that fails is dropped and the rest still apply.
+    const doc = out.rules && typeof out.rules === 'object' ? out.rules.doc : null;
+    if (doc) {
+      const ok = r => { try { R.validateRules({ rules: [r] }); return true; } catch (e) { return false; } };
+      const rules = Array.isArray(doc.rules) ? doc.rules.filter(ok) : [];
+      let def = doc.default;
+      try { R.validateRules({ rules: [], default: def }); } catch (e) { def = undefined; }
+      out.rules = Object.assign({}, out.rules, { doc: Object.assign({}, doc, { rules, default: def }) });
+    } else if (out.rules && typeof out.rules !== 'object') out.rules = null;
     out.style = Object.assign(defaults().style, saved.style);
     for (const k of Object.keys(out.style)) {
       if (typeof defaults().style[k] === 'string' && /^#/.test(defaults().style[k]) && !/^#[0-9a-f]{6}$/i.test(String(out.style[k]))) out.style[k] = defaults().style[k];
@@ -257,6 +277,8 @@
         });
       } catch (e) {
         if (!this.params) this.params = [];
+        // One retry, so a slow first answer doesn't leave parameter-driven columns showing their field names.
+        if (!this.params.length && !this.paramRetry) { this.paramRetry = true; setTimeout(() => this.loadParams().then(() => this.refresh()), 1500); }
       }
     }
 
@@ -360,10 +382,17 @@
       const base = this.cfg.layout;
       const ownLabels = {};
       for (const [k, v] of Object.entries((this.local && this.local.labels) || {})) if (v) ownLabels[k] = v;
-      const out = !this.local ? base : Object.assign({}, base, this.local, {
-        widths: Object.assign({}, base.widths, this.local.widths),
-        labels: Object.assign({}, base.labels, ownLabels)
-      });
+      let out = base;
+      if (this.local) {
+        const lw = Object.assign({}, base.labelWhen);
+        const own = this.local.labelWhen || {};
+        for (const k of Object.keys(ownLabels)) { if (k in own) lw[k] = own[k]; else delete lw[k]; }
+        out = Object.assign({}, base, this.local, {
+          widths: Object.assign({}, base.widths, this.local.widths),
+          labels: Object.assign({}, base.labels, ownLabels),
+          labelWhen: lw
+        });
+      }
       const sess = {};
       if (this.sessionSort !== undefined) sess.sort = this.sessionSort;
       if (this.sessionTopN !== undefined) sess.topN = this.sessionTopN;
@@ -549,8 +578,10 @@
     }
 
     labelFor(col) {
-      const l = this.layout.labels && this.layout.labels[col.key];
-      if (l) return l;
+      const lay = this.layout;
+      const l = lay.labels && lay.labels[col.key];
+      const when = l && lay.labelWhen && lay.labelWhen[col.key];
+      if (l && (when == null || !this.paramFor(col) || this.paramFor(col).value === when)) return l;
       if (col.virtual) {
         const src = this.colDef(col.srcKey), oth = col.otherKey && this.colDef(col.otherKey);
         const s = src ? this.labelFor(src) : col.srcKey, o = oth ? this.labelFor(oth) : '';
@@ -584,8 +615,22 @@
 
     // ---------- pipeline ----------
 
+    // A viewer on a shared layout they haven't changed gets the author's newer version of it.
+    followShared() {
+      const ps = this.presets;
+      if (this.authoring || !ps || ps.kind !== 'shared' || !ps.applied) return;
+      const p = this.activePreset();
+      if (!p) return;
+      const now = normLayout(p.layout);
+      if (now === ps.applied || normLayout(this.currentLayout()) !== ps.applied) return;
+      this.setLocal(p.layout);
+      ps.applied = now;
+      this.savePresets();
+    }
+
     refresh() {
       if (!this.store) return;
+      this.followShared();
       const t0 = performance.now();
       this.computeView();
       this.renderHead();
@@ -618,6 +663,13 @@
         if (c.frozen) left += c.w;
       });
       this.frozenWidth = left;
+      // Table filters belong to what a column shows: hiding the column, or switching its field with a parameter, drops them.
+      const shownNow = {};
+      for (const c of cols) if (!c.virtual) { const p = this.paramFor(c); shownNow[c.key] = p ? p.value : ''; }
+      for (const k of Object.keys(this.filters)) {
+        if (!(k in shownNow) || (this.filterShown && k in this.filterShown && this.filterShown[k] !== shownNow[k])) delete this.filters[k];
+      }
+      this.filterShown = shownNow;
 
       const idx = this.filterRows(cols);
       this.fillVirtual(idx, cols);
@@ -703,7 +755,7 @@
           const lo = f.min === '' || f.min == null ? -Infinity : Number(f.min);
           const hi = f.max === '' || f.max == null ? Infinity : Number(f.max);
           const raw = st.raw[c.key];
-          const scale = c.spec && c.spec.pct ? 100 : 1;
+          const scale = this.shownFactor(c);
           tests.push(i => { const v = raw[i] * scale; return v >= lo && v <= hi; });
         } else if (!c.isNum && f.text) {
           const q = f.text.toLowerCase();
@@ -831,8 +883,9 @@
       }
       const wk = this.weightFor(c);
       if (wk) return { type: 'wavg', weightKey: wk, source: 'weight', text: 'Average weighted by ' + this.labelFor(this.colDef(wk)) };
-      const t = R.resolveTotal(c, this.store.columns, this.cfg.rules && this.cfg.rules.doc, this.cfg.totalOverrides[c.key]);
-      t.text = R.describeTotal(t, this.store.columns.map(x => ({ key: x.key, name: this.labelFor(x) })));
+      const t = R.resolveTotal(c, this.store.columns.filter(x => !x.virtual), this.cfg.rules && this.cfg.rules.doc, this.cfg.totalOverrides[c.key]);
+      // A part hidden by its parameter is never named by that parameter's "(none)" value.
+      t.text = R.describeTotal(t, this.store.columns.map(x => ({ key: x.key, name: !x.virtual && this.autoHidden(x) ? 'a hidden column' : this.labelFor(x) })));
       return t;
     }
 
@@ -883,6 +936,7 @@
       const numDir = firstNum && sorts.find(s => s.key === firstNum.key).dir === 'desc' ? -1 : 1;
       // Date columns order their groups by date, not by the text of the date.
       const byLabel = (a, b) => a.sv != null && b.sv != null ? a.sv - b.sv : collator.compare(a.label, b.label);
+      const nullLast = (a, b) => (a.isNull ? 1 : 0) - (b.isNull ? 1 : 0);
       const build = (rows, level, prefix) => {
         const gc = gcs[level];
         const fmt = this.store.fmt[gc.key];
@@ -891,7 +945,7 @@
         for (const i of rows) {
           const k = fmt[i] == null ? '\u0000null' : fmt[i];
           let g = map.get(k);
-          if (!g) map.set(k, g = { type: 'group', key: prefix + k, label: fmt[i] == null ? this.nullFor(gc) : fmt[i], rows: [], level, colKey: gc.key, sv: dateArr ? dateArr[i] : null });
+          if (!g) map.set(k, g = { type: 'group', key: prefix + k, label: fmt[i] == null ? this.nullFor(gc) : fmt[i], isNull: fmt[i] == null, rows: [], level, colKey: gc.key, sv: dateArr ? dateArr[i] : null });
           g.rows.push(i);
         }
         const list = Array.from(map.values());
@@ -906,14 +960,14 @@
         const own = sorts.find(s => s.key === gc.key);
         if (own) {
           const d = own.dir === 'desc' ? -1 : 1;
-          list.sort((a, b) => d * byLabel(a, b));
+          list.sort((a, b) => nullLast(a, b) || d * byLabel(a, b));
         } else if (firstNum && list.some(g => g.totals[firstNum.key] != null)) {
           list.sort((a, b) => {
             const x = a.totals[firstNum.key], y = b.totals[firstNum.key];
             if (x == null || y == null) return x == null && y == null ? byLabel(a, b) : x == null ? 1 : -1;
             return x === y ? byLabel(a, b) : (x < y ? -numDir : numDir);
           });
-        } else list.sort(byLabel);
+        } else list.sort((a, b) => nullLast(a, b) || byLabel(a, b));
         // Groups named like "Other" go after the others at their level (only in the default order unless
         // the author keeps them last when sorted).
         const isLast = this.lastMatcher();
@@ -1022,9 +1076,9 @@
           <span class="tp-vfs"></span>
           <span class="tp-spacer"></span>
           <button class="tp-chip tp-lchip" type="button" hidden title="Your column changes are saved in this browser only">Custom layout · Reset</button>
-          <button class="tp-icon tp-lay" type="button" title="Layouts" aria-label="Layouts" hidden>${ICONS.lay}</button>
-          <button class="tp-icon tp-cols" type="button" title="Show and hide columns" aria-label="Show and hide columns">${ICONS.cols}</button>
-          <button class="tp-icon tp-dl" type="button" title="Download" aria-label="Download">${ICONS.dl}</button>
+          <button class="tp-icon tp-lay" type="button" title="Layouts" aria-label="Layouts" aria-haspopup="dialog" hidden>${ICONS.lay}</button>
+          <button class="tp-icon tp-cols" type="button" title="Show and hide columns" aria-label="Show and hide columns" aria-haspopup="dialog">${ICONS.cols}</button>
+          <button class="tp-icon tp-dl" type="button" title="Download" aria-label="Download" aria-haspopup="menu">${ICONS.dl}</button>
           <button class="tp-icon tp-gear" type="button" title="Format table" aria-label="Format table" hidden>${ICONS.gear}</button>
           <button class="tp-icon tp-info" type="button" aria-label="Load timing">${ICONS.info}</button>
         </div>
@@ -1104,6 +1158,7 @@
         if (!st.complete) text = 'Loading ' + st.n.toLocaleString() + ' of ' + (st.total || 0).toLocaleString() + '…';
       }
       if (this.statusEl.textContent !== (text || '')) this.statusEl.textContent = text || '';
+      this.statusEl.setAttribute('aria-busy', st && !st.complete ? 'true' : 'false');
       // One chip per column filtered with Keep only / Exclude; clicking it removes that filter.
       const chips = [];
       if (st) {
@@ -1182,9 +1237,18 @@
     }
 
     // Thresholds compare in the units shown on screen, so 5 means 5% on a percent column.
+    // Typed numbers (filters, thresholds) are in the units the column shows: 12 means 12% or 12K when shown that way.
+    shownFactor(c) {
+      const s = c.spec || {};
+      return (s.pct ? 100 : 1) / (UNIT[s.scale] || 1);
+    }
+
     cfLevel(rule, c, v) {
-      const x = v * (c.spec && c.spec.pct ? 100 : 1);
-      const lo = this.cutValue(rule.low), hi = this.cutValue(rule.high);
+      const x = v * this.shownFactor(c);
+      // A parameter's value is a real number, so it is brought into the column's K/M/B units like the cell.
+      const unit = UNIT[(c.spec || {}).scale] || 1;
+      const cut = d => { const n = this.cutValue(d); return n != null && d.param ? n / unit : n; };
+      const lo = cut(rule.low), hi = cut(rule.high);
       if (rule.better === 'lower') {
         if (lo != null && x <= lo) return 'good';
         if (hi != null && x > hi) return 'bad';
@@ -1310,11 +1374,11 @@
         const sort = sorts[si];
         const arrow = sort ? (sort.dir === 'desc' ? ' ▼' : ' ▲') + (sorts.length > 1 ? `<span class="tp-sn">${si + 1}</span>` : '') : '';
         const sortTip = c.vkind === 'run' ? '\nFollows the row order' : sort
-          ? '\nSorted ' + (c.isNum ? (sort.dir === 'desc' ? 'largest to smallest' : 'smallest to largest') : (sort.dir === 'desc' ? 'Z to A' : 'A to Z')) + (sorts.length > 1 ? ' (sort ' + (si + 1) + ' of ' + sorts.length + ')' : '') + ' · Shift-click to add a sort'
+          ? '\nSorted ' + (c.isNum ? (sort.dir === 'desc' ? 'largest to smallest' : 'smallest to largest') : this.isDateCol(c) ? (sort.dir === 'desc' ? 'newest to oldest' : 'oldest to newest') : (sort.dir === 'desc' ? 'Z to A' : 'A to Z')) + (sorts.length > 1 ? ' (sort ' + (si + 1) + ' of ' + sorts.length + ')' : '') + ' · Shift-click to add a sort'
           : '\nClick to sort';
         const how = this.formulaLine(c);
         const p = this.paramFor(c);
-        const ariaSort = sort ? ` aria-sort="${sort.dir === 'desc' ? 'descending' : 'ascending'}"` : '';
+        const ariaSort = sort && si === 0 ? ` aria-sort="${sort.dir === 'desc' ? 'descending' : 'ascending'}"` : '';
         h += `<div ${this.cellAttrs(c, 'tp-h', '', 'columnheader')} data-i="${i}" aria-label="${esc(c.label + (sort && sorts.length > 1 ? ', sort ' + (si + 1) + ' of ' + sorts.length : ''))}"${ariaSort} title="${esc(c.label + (p && this.authoring ? ' (from parameter ' + p.name + ')' : '') + (how ? '\n' + how : '') + sortTip)}">` +
           `<span class="tp-hl">${esc(c.label)}<span aria-hidden="true">${arrow}</span></span>` +
           `<button class="tp-hm" type="button" tabindex="-1" data-i="${i}" aria-label="Column menu for ${esc(c.label)}">▾</button>` +
@@ -1354,7 +1418,7 @@
     totalsHtml(tot, label, cls) {
       const { cols } = this.view;
       const loading = !this.store.complete;
-      const k = this.cfg.totals.location === 'top' ? this.navPre().indexOf('tt') : this.navPre().length + this.view.disp.length;
+      const k = this.cfg.totals.location === 'top' ? this.navPre().indexOf('tt') : this.navPre().length + Math.max(1, this.view.disp.length);
       let h = `<div class="${cls}" role="row" aria-rowindex="${k + 1}">`;
       cols.forEach(c => {
         if (c.key === tot.__label || (!tot.__label && c === cols[0] && !c.isNum)) {
@@ -1440,7 +1504,7 @@
       }
       this.rowsEl.innerHTML = h;
       const tb = this.totBottom.querySelector('.tp-trow');
-      if (tb) tb.setAttribute('aria-rowindex', this.navCount());
+      if (tb) tb.setAttribute('aria-rowindex', this.navCount() + (total ? 0 : 1));
       this.scroller.setAttribute('aria-rowcount', this.navCount() + (total ? 0 : 1));
       this.scroller.setAttribute('aria-colcount', cols.length);
       this.syncActive();
@@ -1502,8 +1566,9 @@
         if (e.target.closest('.tp-hm,input')) return;
         const grp = e.target.closest('.tp-g.mv');
         if (grp) { const r = this.groupRun(+grp.dataset.s, +grp.dataset.e); return this.startColumnDrag(e, r.start, r.end); }
-        const cell = e.target.closest('.tp-h');
-        if (cell && this.canEditLayout()) this.startColumnDrag(e, +cell.dataset.i);
+        const cell = e.target.closest('.tp-h, .tp-g');
+        if (cell) this.scroller.focus({ preventScroll: true });
+        if (cell && cell.matches('.tp-h') && this.canEditLayout()) this.startColumnDrag(e, +cell.dataset.i);
       });
     }
 
@@ -1614,7 +1679,7 @@
     // Sorting always works; when viewers can't change the layout it lasts only for this session.
     setSort(sort) {
       this.range = null;
-      const name = s => { const c = this.colDef(s.key); return c ? this.labelFor(c) + (c.isNum ? (s.dir === 'desc' ? ', largest first' : ', smallest first') : (s.dir === 'desc' ? ', Z to A' : ', A to Z')) : ''; };
+      const name = s => { const c = this.colDef(s.key); return c ? this.labelFor(c) + (c.isNum ? (s.dir === 'desc' ? ', largest first' : ', smallest first') : this.isDateCol(c) ? (s.dir === 'desc' ? ', newest first' : ', oldest first') : (s.dir === 'desc' ? ', Z to A' : ', A to Z')) : ''; };
       this.say(sort && sort.length ? 'Sorted by ' + sort.map(name).filter(Boolean).join(', then ') : 'Sort cleared');
       if (this.canEditLayout()) return this.updateLayout({ sort });
       this.sessionSort = sort;
@@ -1810,10 +1875,10 @@
       const short = s => s.length > 30 ? s.slice(0, 29) + '…' : s;
       const shown = pick && (pick.values.length === 1 ? '"' + short(this.valueText(pick.col, pick.values[0])) + '"' : pick.values.length + ' values');
       const html = '<div class="tp-menu" role="menu">' +
-        (pick ? `<button type="button" data-v="keep">Keep only ${esc(shown)}</button><button type="button" data-v="exclude">Exclude ${esc(shown)}</button><hr>` : '') +
-        `<button type="button" data-m="cells">${what}</button>` +
-        '<button type="button" data-m="headers">Copy with headers</button><hr>' +
-        `<button type="button" data-m="all">Copy whole table (${this.view.idx.length.toLocaleString()} rows)</button></div>`;
+        (pick ? `<button type="button" role="menuitem" data-v="keep">Keep only ${esc(shown)}</button><button type="button" role="menuitem" data-v="exclude">Exclude ${esc(shown)}</button><hr>` : '') +
+        `<button type="button" role="menuitem" data-m="cells">${what}</button>` +
+        '<button type="button" role="menuitem" data-m="headers">Copy with headers</button><hr>' +
+        `<button type="button" role="menuitem" data-m="all">Copy whole table (${this.view.idx.length.toLocaleString()} rows)</button></div>`;
       this.openPop({ getBoundingClientRect: () => ({ left: x, bottom: y }) }, html, pop => pop.addEventListener('click', ev => {
         const v = ev.target.closest('button[data-v]');
         if (v) { this.closePop(); return this.valueFilter(pick, v.dataset.v); }
@@ -1952,6 +2017,8 @@
       this.sayT = setTimeout(() => { this.sayEl.textContent = msg; }, 60);
     }
 
+    isDateCol(c) { return !!(c.isDate || (this.store && this.store.dates[c.key])); }
+
     totalsShown() { return this.cfg.totals.show && this.view.cols.some(c => c.isNum); }
 
     navPre() {
@@ -1997,8 +2064,15 @@
         this.kc = { k: was ? (at >= 0 ? at : pre.indexOf('h')) : this.kc.k - this.kcPre.length + pre.length, c: this.kc.c };
       }
       this.kcPre = pre;
+      const keys = this.view.cols.map(c => c.key).join('\u0001');
+      if (this.kc && this.kcCols && this.kcCols !== keys && this.kcKey) {
+        const at = this.view.cols.findIndex(c => c.key === this.kcKey);
+        if (at >= 0) this.kc = { k: this.kc.k, c: at };
+      }
+      this.kcCols = keys;
       if (!this.kc || !n || !nc) { sc.removeAttribute('aria-activedescendant'); sc.classList.remove('has-ad'); return; }
       this.kc = { k: Math.max(0, Math.min(n - 1, this.kc.k)), c: Math.max(0, Math.min(nc - 1, this.kc.c)) };
+      this.kcKey = this.view.cols[this.kc.c].key;
       const el = this.cellEl(this.kc.k, this.kc.c);
       if (!el) { sc.removeAttribute('aria-activedescendant'); sc.classList.remove('has-ad'); return; }
       const id = 'tp-ad-' + this.kc.k + '-' + this.kc.c;
@@ -2103,7 +2177,7 @@
       }
       const link = this.activeEl && this.activeEl.querySelector('a.tp-link');
       if (link && e.key === 'Enter') return link.click();
-      if (e.key === 'F2') return;
+      if (e.key !== ' ') return;
       const rect = this.activeEl ? this.activeEl.getBoundingClientRect() : null;
       this.range = { r0: kind.r, c0: c, r1: kind.r, c1: c };
       this.clickRow(kind.r, e.ctrlKey || e.metaKey, rect ? { x: rect.left + 8, y: rect.bottom } : null);
@@ -2134,7 +2208,9 @@
         e.preventDefault();
         this.copyToClipboard(text);
       } else if (e.key === 'Escape') {
-        if (!this.pop.hidden) this.closePop(); else this.clearSelection();
+        if (!this.pop.hidden) return this.closePop();
+        if (!e.target.isConnected || (e.target.closest && e.target.closest('input, textarea, select'))) return;
+        this.clearSelection();
       }
     }
 
@@ -2162,7 +2238,8 @@
       const lines = [];
       const headers = mode === 'headers' || mode === 'all' || (mode !== 'cells' && (rows.length > 1 || c1 > c0));
       // Text that starts like a formula gets a leading apostrophe, so pasting into a spreadsheet can't run it.
-      const safe = t => /^\s*[=+\-@]/.test(t) ? "'" + t : t;
+      // Also behind a leading quote: Excel drops quotes around pasted text, which would leave a formula.
+      const safe = t => /^[\s"]*[=+\-@]/.test(t) ? "'" + t : t;
       if (headers) lines.push(cols.slice(c0, c1 + 1).map(c => safe(String(c.label).replace(/[\t\r\n]+/g, ' '))).join('\t'));
       for (const r of rows) {
         const d = typeof r === 'object' ? r.i : disp[r];
@@ -2243,7 +2320,7 @@
           const list = p.list.filter(x => x && typeof x.name === 'string' && x.name.trim()).map(cleanEntry);
           const kind = p.kind === 'shared' ? 'shared' : 'mine';
           const pool = kind === 'shared' ? this.sharedList() : list;
-          this.presets = { list, active: pool.some(x => x.name === p.active) ? p.active : null, kind };
+          this.presets = { list, active: pool.some(x => x.name === p.active) ? p.active : null, kind, applied: typeof p.applied === 'string' ? p.applied : null };
         }
       } catch (e) { /* keep empty */ }
     }
@@ -2414,6 +2491,7 @@
       } else this.setLocal(p.layout);
       this.presets.active = name;
       this.presets.kind = kind;
+      this.presets.applied = !this.authoring && kind === 'shared' ? normLayout(p.layout) : null;
       this.savePresets();
       this.collapse = p.collapse ? this.collapseFrom(p.collapse) : this.defaultCollapse();
       this.persistCollapse();
@@ -2499,7 +2577,7 @@
       const hasLocal = !author && !!(this.local && Object.keys(this.local).length);
       const btn = (a, label, extra) => `<button type="button" data-a="${a}"${extra || ''}>${esc(label)}</button>`;
       const item = (p, k) => btn('apply', (act === p && kind === k ? '✓ ' : '') + p.name, ` data-name="${esc(p.name)}" data-kind="${k}"`);
-      let h = '<div class="tp-menu tp-lays" role="menu"><div class="tp-ph">' + (author ? 'Shared layouts' : 'Layouts') + '</div>';
+      let h = '<div class="tp-menu tp-lays" role="dialog" aria-label="' + (author ? 'Shared layouts' : 'Layouts') + '"><div class="tp-ph">' + (author ? 'Shared layouts' : 'Layouts') + '</div>';
       if (author) {
         h += '<div class="tp-lnote tp-lnote-top">Saved in this workbook. Everyone who opens the dashboard can choose these from Layouts, above their own.</div>';
         L.forEach(p => { h += item(p, 'shared'); });
@@ -2629,7 +2707,7 @@
         items[to].focus();
       });
       const first = this.pop.querySelector('button,input');
-      if (first) first.focus();
+      if (first && !this.pop.contains(document.activeElement)) first.focus();
     }
 
     closePop() {
@@ -2722,7 +2800,13 @@
         this.closePop();
         if (b.dataset.a === 'stats') return this.openStats(i, anchor);
         if (b.dataset.a === 'rename') {
-          return this.askName(anchor, 'Column name', c.label, name => this.updateLayout({ labels: Object.assign({}, this.layout.labels, { [c.key]: name }) }));
+          // On a parameter-driven column the new name is kept for the field it shows now.
+          const p = !c.virtual && this.paramFor(c);
+          return this.askName(anchor, 'Column name', c.label, name => {
+            const labelWhen = Object.assign({}, this.layout.labelWhen);
+            if (p) labelWhen[c.key] = p.value; else delete labelWhen[c.key];
+            this.updateLayout({ labels: Object.assign({}, this.layout.labels, { [c.key]: name }), labelWhen });
+          });
         }
         if (b.dataset.a === 'g-new') return this.askName(anchor, 'Group name (shown above this column)', '', name => this.setGroups(g => { g[c.key] = name; }));
         if (b.dataset.a === 'compare') return this.openCompare(i, anchor);
@@ -2918,7 +3002,9 @@
         case 'unrename': {
           const labels = Object.assign({}, this.authoring ? lay.labels : (this.local && this.local.labels) || {});
           delete labels[c.key];
-          return this.updateLayout({ labels });
+          const labelWhen = Object.assign({}, this.layout.labelWhen);
+          delete labelWhen[c.key];
+          return this.updateLayout({ labels, labelWhen });
         }
         case 'format': return this.openFormat();
         case 'cf-hide': return this.updateLayout({ cfOff: (lay.cfOff || []).concat(c.key) });
@@ -3208,6 +3294,7 @@
     for (const k of ['order', 'hidden', 'pct', 'cfOff']) if (k in l) { const v = strs(l[k]); if (v) out[k] = v; }
     if ('widths' in l) { const v = map(l.widths, x => typeof x === 'number' && isFinite(x) && x > 0 && x < 5000); if (v) out.widths = v; }
     if ('labels' in l) { const v = map(l.labels, x => typeof x === 'string'); if (v) out.labels = v; }
+    if ('labelWhen' in l) { const v = map(l.labelWhen, x => typeof x === 'string'); if (v) out.labelWhen = v; }
     if ('weights' in l) { const v = map(l.weights, x => typeof x === 'string'); if (v) out.weights = v; }
     if (l.freeze === 'auto') out.freeze = 'auto';
     else if (typeof l.freeze === 'number' && isFinite(l.freeze) && l.freeze >= 0) out.freeze = Math.floor(l.freeze);

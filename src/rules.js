@@ -63,6 +63,9 @@
       const t = r.total;
       if (!t || !TOTAL_TYPES.includes(t.type) || t.type === 'auto') throw new Error('Rule ' + (i + 1) + ' has an invalid total type.');
       if (t.type === 'ratio' && (!t.numerator || !t.denominator)) throw new Error('Rule ' + (i + 1) + ' is a ratio but is missing numerator or denominator.');
+      if (t.type === 'ratio' && (typeof t.numerator !== 'string' || typeof t.denominator !== 'string')) throw new Error('Rule ' + (i + 1) + ' needs the numerator and denominator as text.');
+      if (t.multiplier != null && !(Number(t.multiplier) > 0 && isFinite(Number(t.multiplier)))) throw new Error('Rule ' + (i + 1) + ' has a multiplier that is not a positive number.');
+      if (['equals', 'startsWith', 'endsWith', 'contains'].some(k => w[k] != null && typeof w[k] !== 'string')) throw new Error('Rule ' + (i + 1) + ' needs its "when" value as text.');
     });
     const d = obj.default;
     if (d != null && (typeof d !== 'object' || !['sum', 'avg', 'min', 'max', 'none'].includes(d.type))) throw new Error('"default" must have a type of sum, avg, min, max or none.');

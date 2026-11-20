@@ -2,6 +2,34 @@
 
 All notable changes to Totals Table. Versions follow [Semantic Versioning](https://semver.org): MAJOR.MINOR.PATCH, where a patch fixes bugs, a minor version adds features without breaking anything, and a major version changes something existing (read its notes before updating). The version in use shows when hovering the info icon in the table's toolbar.
 
+## 1.7.1 (2026-11-20)
+
+From a full review of 1.7.0.
+
+**Fixed**
+- Saving or renaming a layout from the keyboard put focus on the first button ("Published layout") instead of the name box, so pressing Space or Enter reset the layout. Focus now goes to the name box.
+- Number filters and color thresholds use the units the column shows: on a column shown in thousands ("$0.52K"), 0.5 means $500. Thresholds read from a parameter still use the parameter's real value.
+- Table filters belong to what a column shows. Hiding a filtered column, or switching its field with a parameter, now clears that column's filters instead of filtering by a column you can't see or by values from the old field.
+- A viewer on a shared layout they haven't changed now gets the author's updated version, instead of keeping the old one and showing "(edited)". A viewer who changed it keeps their version.
+- Renaming a parameter-driven column keeps the new name only while the column shows the same field. Renames saved before this version apply as before.
+- Esc in a box (filter, search, rename) only leaves the box; it no longer clears the dashboard selection.
+- Clicking a header gives the table keyboard focus, as clicking a cell does.
+- Enter on a plain cell no longer selects the row (Space does). Enter still sorts headers, opens and closes subtotal rows and opens links.
+- The current cell stays on its column when columns are moved.
+- A blank subtotal group sorts last, like blank rows, instead of by its "Null" text.
+- Added columns (rank, % of total and so on) are no longer matched by totals rules, so renaming one to a field's name can't blank another column's total.
+- Date columns are described as oldest to newest, not A to Z, in header tooltips and announcements.
+- Screen readers: the table's rows keep distinct positions when filters leave no rows, menus list their items as menu items, toolbar buttons say they open a menu or panel, only the first sort column carries the sort state, and "Loading..." counts aren't read out repeatedly.
+- A ratio total whose part is hidden by its parameter describes that part as "a hidden column" instead of the parameter's "(none)" value.
+- If Tableau is slow to send parameters on first load, the table asks once more, so parameter-driven columns don't show their field names.
+- Settings saved in a workbook are checked when it opens: a totals rule, number format, "(none)" list or formatting entry that isn't valid is dropped, and the rest of the table still loads. A "__proto__" key in saved settings is ignored.
+- Rules files: a multiplier must be a positive number, and "when" values, numerators and denominators must be text. Before, a bad multiplier silently became 1.
+- Copying a cell that starts with a quote followed by =, +, - or @ also gets a leading apostrophe.
+
+**Known differences, not changed**
+- Excel data bars run from 0 to the column's largest value; on screen, negative values get red bars scaled by the largest absolute value. Bars on totals rows show on screen only.
+- Excel can show "-0.00" for a tiny negative number that the table shows as "0.00".
+
 ## 1.7.0 (2026-11-19)
 
 **Added**
@@ -40,7 +68,7 @@ Note: Excel can't show dates before 1900, so such dates show as ##### in an Exce
 ## 1.6.3 (2026-11-17)
 
 **Changed**
-- CSV downloads keep numbers at full value instead of rounding them to the decimals the table shows. A CSV is for pivots and further math, and rounded values made recalculated ratios drift from the dashboard (for example a cost per order rebuilt from an order count of 2.9 instead of 2.933). The CSV and Excel downloads now hold the same values; Excel still shows them formatted. Values are trimmed to 15 significant digits so floating-point noise like 0.30000000000000004 comes out as 0.3.
+- CSV downloads keep numbers at full value instead of rounding them to the decimals the table shows. A CSV is for pivots and further math, and rounded values made recalculated ratios drift from the dashboard (for example a Profit Ratio rebuilt from Profit and Sales rounded to whole dollars). The CSV and Excel downloads now hold the same values; Excel still shows them formatted. Values are trimmed to 15 significant digits so floating-point noise like 0.30000000000000004 comes out as 0.3.
 
 ## 1.6.2 (2026-11-17)
 
